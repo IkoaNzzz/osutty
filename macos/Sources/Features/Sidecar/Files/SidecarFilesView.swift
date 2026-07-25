@@ -319,7 +319,6 @@ struct SidecarFilesView: View {
             entry: entry,
             surfaceID: surface.surfaceView.id,
             model: model,
-            quickLook: quickLook,
             quickEditorManager: quickEditorManager
         )
     }

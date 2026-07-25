@@ -5,21 +5,18 @@ struct SidecarFileContextMenu: View {
     let entry: SidecarFileEntry
     let surfaceID: UUID
     @ObservedObject var model: SidecarFilesModel
-    @ObservedObject var quickLook: SidecarQuickLookController
     @ObservedObject var quickEditorManager: SidecarQuickEditorManager
 
     var body: some View {
         Group {
             if entry.isDirectory {
                 Button("Open in Files Panel", action: openInFilesPanel)
-            } else {
-                Button("Quick Look", action: preview)
             }
 
             Button("Open", action: open)
 
             if !entry.isDirectory {
-                Button("Open in Osutty", action: openInCurrentPane)
+                Button("Quick Look", action: openInCurrentPane)
             }
 
             Divider()
@@ -45,11 +42,6 @@ struct SidecarFileContextMenu: View {
         model.select(entry)
         model.searchQuery = ""
         model.browse(entry.url)
-    }
-
-    private func preview() {
-        model.select(entry)
-        quickLook.preview(entry.url)
     }
 
     private func open() {
