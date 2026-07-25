@@ -555,12 +555,66 @@ struct SidecarFilesModelTests {
 
 struct SidecarProcessServiceTests {
     @Test func readsTheCurrentProcessWithoutScanningTheSystem() async {
-        let snapshot = await SidecarProcessService.shared.snapshot(
+        let service = SidecarProcessService()
+        let snapshot = await service.snapshot(
             foregroundPID: Int(ProcessInfo.processInfo.processIdentifier)
         )
 
         #expect(snapshot.processes.first?.pid == ProcessInfo.processInfo.processIdentifier)
         #expect(snapshot.processes.first?.name.isEmpty == false)
+        #expect(snapshot.resources.memoryBytes > 0)
+        #expect(snapshot.resources.systemMemoryUsedBytes > 0)
+        #expect(
+            snapshot.resources.systemMemoryTotalBytes
+                >= snapshot.resources.systemMemoryUsedBytes
+        )
+        #expect(snapshot.resources.threadCount > 0)
+    }
+
+    @Test func calculatesResourceRatesFromConsecutiveSamples() async {
+        let service = SidecarProcessService()
+        let pid = Int(ProcessInfo.processInfo.processIdentifier)
+
+        let initial = await service.snapshot(foregroundPID: pid)
+        #expect(initial.resources.cpuPercent == nil)
+        #expect(initial.resources.systemCPUPercent == nil)
+        #expect(initial.resources.readBytesPerSecond == nil)
+        #expect(initial.resources.writeBytesPerSecond == nil)
+
+        try? await Task.sleep(for: .milliseconds(600))
+        let refreshed = await service.snapshot(foregroundPID: pid)
+
+        #expect(refreshed.resources.cpuPercent != nil)
+        #expect(refreshed.resources.systemCPUPercent != nil)
+        #expect(refreshed.resources.readBytesPerSecond != nil)
+        #expect(refreshed.resources.writeBytesPerSecond != nil)
+    }
+
+    @Test func skipsResourceSamplingWhenMonitoringIsCollapsed() async {
+        let service = SidecarProcessService()
+        let pid = Int(ProcessInfo.processInfo.processIdentifier)
+        _ = await service.snapshot(foregroundPID: pid)
+        try? await Task.sleep(for: .milliseconds(600))
+        let sampled = await service.snapshot(foregroundPID: pid)
+        #expect(sampled.resources.cpuPercent != nil)
+
+        let snapshot = await service.snapshot(
+            foregroundPID: Int(ProcessInfo.processInfo.processIdentifier),
+            includeResources: false
+        )
+
+        #expect(!snapshot.processes.isEmpty)
+        #expect(snapshot.resources == .empty)
+        #expect(snapshot.processes.allSatisfy {
+            $0.cpuPercent == nil
+                && $0.memoryBytes == 0
+                && $0.threadCount == 0
+        })
+
+        let resumed = await service.snapshot(foregroundPID: pid)
+        #expect(resumed.resources.cpuPercent == nil)
+        #expect(resumed.resources.readBytesPerSecond == nil)
+        #expect(resumed.resources.writeBytesPerSecond == nil)
     }
 
     @Test func findsAListeningPortInTheForegroundProcessTree() async throws {
@@ -593,7 +647,8 @@ struct SidecarProcessServiceTests {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let port = try #require(UInt16(portString))
 
-        let snapshot = await SidecarProcessService.shared.snapshot(
+        let service = SidecarProcessService()
+        let snapshot = await service.snapshot(
             foregroundPID: Int(ProcessInfo.processInfo.processIdentifier)
         )
 
@@ -603,6 +658,38 @@ struct SidecarProcessServiceTests {
                 && $0.address == "127.0.0.1"
                 && $0.port == port
         })
+    }
+}
+
+struct SidecarResourceHistoryTests {
+    @Test func retainsOnlyTheMostRecentSamples() {
+        var history = SidecarResourceHistory()
+
+        for index in 0..<50 {
+            history.append(SidecarResourceSnapshot(
+                cpuPercent: Double(index),
+                systemCPUPercent: Double(index + 100),
+                memoryBytes: UInt64(index),
+                systemMemoryUsedBytes: UInt64(index + 200),
+                systemMemoryTotalBytes: 1_000,
+                readBytesPerSecond: 0,
+                writeBytesPerSecond: 0,
+                threadCount: 1
+            ))
+        }
+
+        #expect(history.currentCPUPercent.count == 45)
+        #expect(history.systemCPUPercent.count == 45)
+        #expect(history.currentMemoryBytes.count == 45)
+        #expect(history.systemMemoryUsedBytes.count == 45)
+        #expect(history.currentCPUPercent.first == 5)
+        #expect(history.currentCPUPercent.last == 49)
+        #expect(history.systemCPUPercent.first == 105)
+        #expect(history.systemCPUPercent.last == 149)
+        #expect(history.currentMemoryBytes.first == 5)
+        #expect(history.currentMemoryBytes.last == 49)
+        #expect(history.systemMemoryUsedBytes.first == 205)
+        #expect(history.systemMemoryUsedBytes.last == 249)
     }
 }
 
@@ -748,6 +835,25 @@ struct SidecarContainerTests {
                 horizontalTranslation: -10.5,
                 availableWidth: 1_200
             ) == 235
+        )
+    }
+
+    @Test func dragWidthAlignsToBackingPixelsOnRetinaDisplays() {
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -10.26,
+                availableWidth: 1_200,
+                displayScale: 2
+            ) == 234.5
+        )
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -10.24,
+                availableWidth: 1_200,
+                displayScale: 2
+            ) == 234
         )
     }
 

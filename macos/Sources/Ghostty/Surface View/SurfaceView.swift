@@ -259,7 +259,7 @@ extension Ghostty {
     // size during a resize operation.
     struct SurfaceResizeOverlay: View {
         let geoSize: CGSize
-        let size: ghostty_surface_size_s
+        let size: Ghostty.SurfaceGridSize
         let overlay: Ghostty.Config.ResizeOverlay
         let position: Ghostty.Config.ResizeOverlayPosition
         let duration: UInt

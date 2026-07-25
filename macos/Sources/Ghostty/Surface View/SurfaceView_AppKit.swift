@@ -457,14 +457,18 @@ extension Ghostty {
         }
 
         override func sizeDidChange(_ size: CGSize) {
+            // AppKit can run multiple layout passes for one visible frame.
+            // Avoid sending the same framebuffer size back through libghostty
+            // on every pass, which can otherwise create a layout/publish loop.
+            guard contentSizeBacking != size else { return }
+            contentSize = size
+
             // Ghostty wants to know the actual framebuffer size... It is very important
             // here that we use "size" and NOT the view frame. If we're in the middle of
             // an animation (i.e. a fullscreen animation), the frame will not yet be updated.
             // The size represents our final size we're going for.
             let scaledSize = self.convertToBacking(size)
             setSurfaceSize(width: UInt32(scaledSize.width), height: UInt32(scaledSize.height))
-            // Store this size so we can reuse it when backing properties change
-            contentSize = size
         }
 
         private func setSurfaceSize(width: UInt32, height: UInt32) {
@@ -474,8 +478,15 @@ extension Ghostty {
             ghostty_surface_set_size(surface, width, height)
 
             // Update our cached size metrics
-            let size = ghostty_surface_size(surface)
-            DispatchQueue.main.async {
+            let rawSize = ghostty_surface_size(surface)
+            let size = Ghostty.SurfaceGridSize(
+                columns: rawSize.columns,
+                rows: rawSize.rows
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard self.surfaceSize != size else { return }
+
                 // DispatchQueue required since this may be called by SwiftUI off
                 // the main thread and Published changes need to be on the main
                 // thread. This caused a crash on macOS <= 14.
