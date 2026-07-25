@@ -12,6 +12,10 @@ class UpdateController {
     private let userDriver: UpdateDriver
     private var installCancellable: AnyCancellable?
 
+    var isEnabled: Bool {
+        Bundle.main.infoDictionary?["OsuttyUpdatesEnabled"] as? Bool == true
+    }
+
     var viewModel: UpdateViewModel {
         userDriver.viewModel
     }
@@ -44,6 +48,7 @@ class UpdateController {
     /// This must be called before the updater can check for updates. If starting fails,
     /// the error will be shown to the user.
     func startUpdater() {
+        guard isEnabled else { return }
         do {
             try updater.start()
         } catch {
@@ -92,6 +97,7 @@ class UpdateController {
     ///
     /// This is typically connected to a menu item action.
     @objc func checkForUpdates() {
+        guard isEnabled else { return }
         // If we're already idle, then just check for updates immediately.
         if viewModel.state == .idle {
             updater.checkForUpdates()
@@ -116,7 +122,7 @@ class UpdateController {
     /// - Returns: Whether the menu item should be enabled
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(checkForUpdates) {
-            return updater.canCheckForUpdates
+            return isEnabled && updater.canCheckForUpdates
         }
         return true
     }

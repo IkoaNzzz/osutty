@@ -1161,6 +1161,24 @@ GHOSTTY_API bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_
 GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
                                               ghostty_selection_s,
                                               ghostty_text_s*);
+// Returns a compact binary snapshot of recent OSC 133 command inputs.
+// Each record contains a little-endian uint32 screen row, one flags byte
+// (bit 0 means a later semantic prompt exists), a little-endian uint32 UTF-8
+// byte length, and the command bytes. Free the returned buffer with
+// ghostty_surface_free_text.
+GHOSTTY_API bool ghostty_surface_command_outline(ghostty_surface_t,
+                                                    uint32_t,
+                                                    ghostty_text_s*);
+// Equivalent to ghostty_surface_command_outline, but returns an empty text
+// snapshot when no OSC 133 state changed since previous_generation.
+GHOSTTY_API bool ghostty_surface_command_outline_if_changed(ghostty_surface_t,
+                                                               uint32_t,
+                                                               uint64_t,
+                                                               uint64_t*,
+                                                               ghostty_text_s*);
+// Scrolls to a screen row returned by ghostty_surface_command_outline.
+GHOSTTY_API bool ghostty_surface_scroll_to_command(ghostty_surface_t,
+                                                      uint32_t);
 GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 
 #ifdef __APPLE__

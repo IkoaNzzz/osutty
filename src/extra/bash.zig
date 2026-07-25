@@ -331,7 +331,7 @@ fn writeBashCompletions(writer: *std.Io.Writer) !void {
         \\  return 0
         \\}
         \\
-        \\complete -o nospace -o bashdefault -F _ghostty ghostty
+        \\complete -o nospace -o bashdefault -F _ghostty osutty
         \\
     );
 }

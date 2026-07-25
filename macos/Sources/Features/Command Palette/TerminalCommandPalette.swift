@@ -12,6 +12,9 @@ struct TerminalCommandPaletteView: View {
     /// The configuration so we can lookup keyboard shortcuts.
     @ObservedObject var ghosttyConfig: Ghostty.Config
 
+    /// Window-scoped Sidecar state for native macOS commands.
+    @ObservedObject var sidecarState: SidecarState
+
     /// The update view model for showing update commands.
     var updateViewModel: UpdateViewModel?
 
@@ -64,7 +67,7 @@ struct TerminalCommandPaletteView: View {
         // Sort the rest. We replace ":" with a character that sorts before space
         // so that "Foo:" sorts before "Foo Bar:". Use sortKey as a tie-breaker
         // for stable ordering when titles are equal.
-        options.append(contentsOf: (jumpOptions + terminalOptions).sorted { a, b in
+        options.append(contentsOf: (jumpOptions + sidecarOptions + terminalOptions).sorted { a, b in
             let aNormalized = a.title.replacingOccurrences(of: ":", with: "\t")
             let bNormalized = b.title.replacingOccurrences(of: ":", with: "\t")
             let comparison = aNormalized.localizedCaseInsensitiveCompare(bNormalized)
@@ -78,6 +81,12 @@ struct TerminalCommandPaletteView: View {
             return false
         })
         return options
+    }
+
+    /// Native Sidecar commands don't have Ghostty core binding actions, so append
+    /// them directly while sharing the same state as the titlebar and View menu.
+    private var sidecarOptions: [CommandOption] {
+        SidecarCommandOptions.make(state: sidecarState)
     }
 
     /// Commands for installing or canceling available updates.
@@ -175,6 +184,42 @@ struct TerminalCommandPaletteView: View {
         }
     }
 
+}
+
+@MainActor
+enum SidecarCommandOptions {
+    static func make(state: SidecarState) -> [CommandOption] {
+        var options = [
+            CommandOption(
+                title: "Toggle Sidecar",
+                description: "Show or hide the terminal Sidecar.",
+                symbols: SidecarShortcut.keyboardShortcut.keyList,
+                leadingIcon: "sidebar.right"
+            ) {
+                state.toggle()
+            },
+        ]
+
+        options.append(contentsOf: SidecarPanel.allCases.map { panel in
+            CommandOption(
+                title: "Open Sidecar: \(panel.title)",
+                description: "Open the terminal Sidecar on the \(panel.title) panel.",
+                leadingIcon: panel.systemImage
+            ) {
+                state.show(panel)
+            }
+        })
+
+        options.append(CommandOption(
+            title: "Close Sidecar",
+            description: "Hide the terminal Sidecar.",
+            leadingIcon: "sidebar.right"
+        ) {
+            state.hide()
+        })
+
+        return options
+    }
 }
 
 /// This is done to ensure that the given view is in the responder chain.

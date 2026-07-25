@@ -88,7 +88,7 @@ zig build \
 
 The build options are covered in the next section, but this will build
 and install Ghostty to `/tmp/ghostty` with the prefix `/usr` (i.e. the
-binary will be at `/tmp/ghostty/usr/bin/ghostty`). This style is common
+binary will be at `/tmp/ghostty/usr/bin/osutty`). This style is common
 for system packages which separate a build and install step, since the
 install step can then be done with a `mv` or `cp` command (from `/tmp/ghostty`
 to wherever the package manager expects it).

@@ -1451,6 +1451,17 @@ extension Ghostty {
                 guard let surface = target.target.surface else { return }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
 
+                #if os(macOS)
+                DispatchQueue.main.async { [weak surfaceView] in
+                    guard let surfaceView else { return }
+                    SidecarCommandMetadataStore.shared.record(
+                        surfaceView: surfaceView,
+                        exitCode: v.exit_code,
+                        durationNanoseconds: v.duration
+                    )
+                }
+                #endif
+
                 // Determine if we even care about command finish notifications
                 guard let config = (NSApplication.shared.delegate as? AppDelegate)?.ghostty.config else { return }
                 switch config.notifyOnCommandFinish {

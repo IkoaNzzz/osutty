@@ -1670,6 +1670,168 @@ pub const CAPI = struct {
         return true;
     }
 
+    /// Returns a compact binary snapshot of recent OSC 133 command inputs.
+    ///
+    /// Each record is a little-endian u32 screen row, one flags byte (bit 0
+    /// means a later semantic prompt exists), a little-endian u32 UTF-8 byte
+    /// length, and the command bytes. A binary format avoids JSON escaping
+    /// while the renderer mutex is held.
+    export fn ghostty_surface_command_outline(
+        surface: *Surface,
+        requested_limit: u32,
+        result: *Text,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+
+        const screen = core_surface.renderer_state.terminal.screens.active;
+        return commandOutlineResultLocked(
+            screen,
+            @min(requested_limit, 500),
+            result,
+        );
+    }
+
+    /// Returns a command outline only when OSC 133 state changed since the
+    /// caller's previous generation. This keeps polling cheap while preserving
+    /// the existing snapshot API for other embedders.
+    export fn ghostty_surface_command_outline_if_changed(
+        surface: *Surface,
+        requested_limit: u32,
+        previous_generation: u64,
+        generation: *u64,
+        result: *Text,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+
+        const terminal_state = core_surface.renderer_state.terminal;
+        generation.* = terminal_state.semantic_prompt_generation;
+        result.* = emptyText();
+        if (generation.* == previous_generation) return true;
+
+        return commandOutlineResultLocked(
+            terminal_state.screens.active,
+            @min(requested_limit, 500),
+            result,
+        );
+    }
+
+    fn commandOutlineResultLocked(
+        screen: *terminal.Screen,
+        requested_limit: u32,
+        result: *Text,
+    ) bool {
+        const data = commandOutlineLocked(screen, requested_limit) catch |err| {
+            log.warn("error reading command outline err={}", .{err});
+            return false;
+        };
+
+        result.* = .{
+            .tl_px_x = -1,
+            .tl_px_y = -1,
+            .offset_start = 0,
+            .offset_len = 0,
+            .text = data.ptr,
+            .text_len = data.len,
+        };
+        return true;
+    }
+
+    fn emptyText() Text {
+        return .{
+            .tl_px_x = -1,
+            .tl_px_y = -1,
+            .offset_start = 0,
+            .offset_len = 0,
+            .text = null,
+            .text_len = 0,
+        };
+    }
+
+    fn commandOutlineLocked(
+        screen: *terminal.Screen,
+        requested_limit: u32,
+    ) Allocator.Error![:0]const u8 {
+        var output: std.Io.Writer.Allocating = .init(global.alloc());
+        defer output.deinit();
+
+        if (!screen.semantic_prompt.seen or requested_limit == 0) {
+            return try output.toOwnedSliceSentinel(0);
+        }
+
+        var prompts: [500]terminal.PageList.Pin = undefined;
+        var prompt_count: usize = 0;
+        const limit: usize = @intCast(requested_limit);
+        const bottom = screen.pages.getBottomRight(.screen) orelse
+            return try output.toOwnedSliceSentinel(0);
+        var prompt_it = bottom.promptIterator(.left_up, null);
+        while (prompt_count < limit) {
+            prompts[prompt_count] = prompt_it.next() orelse break;
+            prompt_count += 1;
+        }
+
+        var reverse_index = prompt_count;
+        while (reverse_index > 0) {
+            reverse_index -= 1;
+            const prompt = prompts[reverse_index];
+            const highlight = screen.pages.highlightSemanticContent(
+                prompt,
+                .input,
+            ) orelse continue;
+            const command = try screen.selectionString(global.alloc(), .{
+                .sel = terminal.Selection.init(
+                    highlight.start,
+                    highlight.end,
+                    false,
+                ),
+            });
+            defer global.alloc().free(command);
+            if (command.len == 0) continue;
+
+            const point = screen.pages.pointFromPin(.screen, prompt) orelse continue;
+            const command_len: u32 = @intCast(@min(
+                command.len,
+                64 * 1024,
+            ));
+            var row_bytes: [4]u8 = undefined;
+            var length_bytes: [4]u8 = undefined;
+            std.mem.writeInt(u32, &row_bytes, point.screen.y, .little);
+            std.mem.writeInt(u32, &length_bytes, command_len, .little);
+            output.writer.writeAll(&row_bytes) catch return error.OutOfMemory;
+            output.writer.writeByte(
+                if (reverse_index > 0) 1 else 0,
+            ) catch return error.OutOfMemory;
+            output.writer.writeAll(&length_bytes) catch return error.OutOfMemory;
+            output.writer.writeAll(
+                command[0..command_len],
+            ) catch return error.OutOfMemory;
+        }
+
+        return try output.toOwnedSliceSentinel(0);
+    }
+
+    /// Scroll to a screen row returned by ghostty_surface_command_outline.
+    export fn ghostty_surface_scroll_to_command(
+        surface: *Surface,
+        row: u32,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        {
+            core_surface.renderer_state.mutex.lockUncancelable(global.io());
+            defer core_surface.renderer_state.mutex.unlock(global.io());
+
+            const screen = core_surface.renderer_state.terminal.screens.active;
+            if (@as(usize, row) >= screen.pages.total_rows) return false;
+            screen.scroll(.{ .row = row });
+        }
+
+        surface.refresh();
+        return true;
+    }
+
     export fn ghostty_surface_free_text(_: *Surface, ptr: *Text) void {
         ptr.deinit();
     }

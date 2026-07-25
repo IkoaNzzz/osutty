@@ -7,4 +7,4 @@ Actions=RunGhosttyDir
 [Desktop Action RunGhosttyDir]
 Name=Open Ghostty Here
 Icon=com.mitchellh.ghostty
-Exec=ghostty +new-window --working-directory=%F
+Exec=osutty +new-window --working-directory=%F

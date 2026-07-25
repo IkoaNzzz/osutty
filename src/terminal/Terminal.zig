@@ -91,6 +91,10 @@ mouse_shape: mouse.Shape = .text,
 /// Per-session Glyph Protocol registrations.
 glyph_glossary: glyph.Glossary = .empty,
 
+/// Monotonic version for OSC 133 state. Sidecar outline readers use this to
+/// avoid rebuilding the full command snapshot when no semantic event occurred.
+semantic_prompt_generation: u64 = 0,
+
 /// These are just a packed set of flags we may set on the terminal.
 flags: packed struct {
     // This supports a Kitty extension where programs using semantic
@@ -1938,6 +1942,8 @@ pub fn semanticPrompt(
     self: *Terminal,
     cmd: osc.Command.SemanticPrompt,
 ) !void {
+    self.semantic_prompt_generation +%= 1;
+
     switch (cmd.action) {
         .fresh_line => try self.semanticPromptFreshLine(),
 
@@ -14583,6 +14589,20 @@ test "Terminal: OSC133A click_events=1 sets click to click_events" {
     });
 
     try testing.expectEqual(Screen.SemanticPrompt.SemanticClick{ .click_events = .absolute }, t.screens.active.semantic_prompt.click);
+}
+
+test "Terminal: OSC133 increments sidecar outline generation" {
+    const alloc = testing.allocator;
+    const io_impl = testing.io;
+    var t = try init(io_impl, alloc, .{ .cols = 10, .rows = 5 });
+    defer t.deinit(alloc);
+
+    try testing.expectEqual(@as(u64, 0), t.semantic_prompt_generation);
+    try t.semanticPrompt(.{
+        .action = .fresh_line_new_prompt,
+        .options_unvalidated = "",
+    });
+    try testing.expectEqual(@as(u64, 1), t.semantic_prompt_generation);
 }
 
 test "Terminal: OSC133A click_events=2 sets click to click_events (relative)" {

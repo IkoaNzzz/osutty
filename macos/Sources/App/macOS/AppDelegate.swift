@@ -763,7 +763,8 @@ class AppDelegate: NSObject,
         // explicitly false (NO), auto-updates are disabled. Otherwise, we use the behavior
         // defined by our "auto-update" configuration (if set) or fall back to Sparkle
         // user-based defaults.
-        if Bundle.main.infoDictionary?["SUEnableAutomaticChecks"] as? Bool == false {
+        if !updateController.isEnabled
+            || Bundle.main.infoDictionary?["SUEnableAutomaticChecks"] as? Bool == false {
             updateController.updater.automaticallyChecksForUpdates = false
             updateController.updater.automaticallyDownloadsUpdates = false
         } else if let autoUpdate = config.autoUpdate {
@@ -1094,6 +1095,10 @@ extension AppDelegate {
 
     /// Setup all the images for our menu items.
     private func setupMenuImages() {
+        MainActor.assumeIsolated {
+            SidecarMenuInstaller.install(before: menuTerminalInspector)
+        }
+
         // Note: This COULD Be done all in the xib file, but I find it easier to
         // modify this stuff as code.
         self.menuAbout?.setImageIfDesired(systemSymbolName: "info.circle")
@@ -1271,6 +1276,9 @@ extension AppDelegate: NSMenuItemValidation {
         switch item.action {
         case #selector(setAsDefaultTerminal(_:)):
             return NSWorkspace.shared.defaultTerminal != Bundle.main.bundleURL
+
+        case #selector(checkForUpdates(_:)):
+            return updateController.isEnabled
 
         case #selector(floatOnTop(_:)),
             #selector(useAsDefault(_:)):

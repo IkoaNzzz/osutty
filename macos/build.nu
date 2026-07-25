@@ -19,6 +19,20 @@ def main [
         []
     }
 
+    # Xcode enables coverage for scheme builds that include test plans, even
+    # when the requested action is only "build". Keep coverage for tests, but
+    # never ship an instrumented Debug or Release application.
+    let coverage_settings = if $action == "test" {
+        []
+    } else {
+        [
+            "ENABLE_CODE_COVERAGE=NO"
+            "CLANG_COVERAGE_MAPPING=NO"
+            "GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=NO"
+            "GCC_GENERATE_TEST_COVERAGE_FILES=NO"
+        ]
+    }
+
     (^env -i
         $"HOME=($env.HOME)"
         "PATH=/usr/bin:/bin:/usr/sbin:/sbin"
@@ -28,5 +42,6 @@ def main [
         -configuration $configuration
         $"SYMROOT=($build_dir)"
         ...$skip_testing
+        ...$coverage_settings
         $action)
 }

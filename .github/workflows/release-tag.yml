@@ -181,7 +181,7 @@ jobs:
       # The native app is built with native XCode tooling. This also does
       # codesigning. IMPORTANT: this must NOT run in a Nix environment.
       # Nix breaks xcodebuild so this has to be run outside.
-      - name: Build Ghostty.app
+      - name: Build Osutty.app
         run: |
           cd macos
           xcodebuild -target Ghostty -configuration Release \
@@ -190,17 +190,11 @@ jobs:
 
       # Add all our metadata to Info.plist so we can reference it later.
       - name: Update Info.plist
-        env:
-          SPARKLE_KEY_PUB: ${{ secrets.PROD_MACOS_SPARKLE_KEY_PUB }}
         run: |
           # Version Info
-          /usr/libexec/PlistBuddy -c "Set :GhosttyCommit $GHOSTTY_COMMIT" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GHOSTTY_BUILD" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GHOSTTY_VERSION" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-
-          # Updater
-          /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_KEY_PUB" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Delete :SUEnableAutomaticChecks" "macos/build/Release/Ghostty.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :GhosttyCommit $GHOSTTY_COMMIT" "macos/build/Release/Osutty.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GHOSTTY_BUILD" "macos/build/Release/Osutty.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GHOSTTY_VERSION" "macos/build/Release/Osutty.app/Contents/Info.plist"
 
       - name: Codesign app bundle
         env:
@@ -226,15 +220,15 @@ jobs:
           #     but since they're part of the build, they still need to be
           #     codesigned.
           #   - The binaries in the "Versions" folders need to NOT be symlinks.
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/PlugIns/DockTilePlugin.plugin"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Osutty.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Osutty.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Osutty.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Osutty.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Osutty.app/Contents/Frameworks/Sparkle.framework"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Osutty.app/Contents/PlugIns/DockTilePlugin.plugin"
 
           # Codesign the app bundle
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime --entitlements "macos/Ghostty.entitlements" macos/build/Release/Ghostty.app
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime --entitlements "macos/Ghostty.entitlements" macos/build/Release/Osutty.app
 
       - name: Create DMG
         env:
@@ -243,9 +237,9 @@ jobs:
           npm install --global create-dmg
           create-dmg \
             --identity="$MACOS_CERTIFICATE_NAME" \
-            ./macos/build/Release/Ghostty.app \
+            ./macos/build/Release/Osutty.app \
             ./
-          mv ./Ghostty*.dmg ./Ghostty.dmg
+          mv ./Osutty*.dmg ./Ghostty.dmg
 
       - name: "Notarize DMG"
         env:
@@ -272,14 +266,14 @@ jobs:
           # both the app and the dmg
           echo "Attach staple"
           xcrun stapler staple "Ghostty.dmg"
-          xcrun stapler staple "macos/build/Release/Ghostty.app"
+          xcrun stapler staple "macos/build/Release/Osutty.app"
 
       # Zip up the app and symbols
       - name: Zip App
         run: |
           cd macos/build/Release
-          zip -9 -r --symlinks ../../../ghostty-macos-universal.zip Ghostty.app
-          zip -9 -r --symlinks ../../../ghostty-macos-universal-dsym.zip Ghostty.app.dSYM/
+          zip -9 -r --symlinks ../../../ghostty-macos-universal.zip Osutty.app
+          zip -9 -r --symlinks ../../../ghostty-macos-universal-dsym.zip Osutty.app.dSYM/
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

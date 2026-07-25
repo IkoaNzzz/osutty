@@ -55,6 +55,10 @@ pub const i18n: bool = config.i18n;
 /// There are many places that don't use this variable so simply swapping
 /// this variable is NOT ENOUGH to change the bundle ID. I just wanted to
 /// avoid it in Zig coe as much as possible.
+// Keep the core configuration namespace compatible with Ghostty. The macOS
+// Osutty application has its own bundle identifier in the Xcode project, while
+// this value intentionally preserves ~/.config/ghostty and the existing
+// Application Support configuration path.
 pub const bundle_id = "com.mitchellh.ghostty";
 
 /// True if we should have "slow" runtime safety checks. The initial motivation

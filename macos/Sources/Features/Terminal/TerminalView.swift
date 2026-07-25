@@ -35,6 +35,9 @@ protocol TerminalViewModel: ObservableObject {
 
     /// The update overlay should be visible.
     var updateOverlayIsVisible: Bool { get }
+
+    /// Window-scoped state for the optional terminal sidecar.
+    var sidecarState: SidecarState { get }
 }
 
 /// The main terminal view. This terminal view supports splits.
@@ -43,6 +46,9 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
 
     // The required view model
     @ObservedObject var viewModel: ViewModel
+
+    // SidecarState is nested inside the view model, so observe it directly.
+    @ObservedObject private var sidecarState: SidecarState
 
     // An optional delegate to receive information about terminal changes.
     weak var delegate: (any TerminalViewDelegate)?
@@ -57,6 +63,17 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
     @FocusedValue(\.ghosttySurfaceView) private var focusedSurface
     @FocusedValue(\.ghosttySurfacePwd) private var surfacePwd
     @FocusedValue(\.ghosttySurfaceCellSize) private var cellSize
+
+    init(
+        ghostty: Ghostty.App,
+        viewModel: ViewModel,
+        delegate: (any TerminalViewDelegate)?
+    ) {
+        self.ghostty = ghostty
+        self.viewModel = viewModel
+        self.sidecarState = viewModel.sidecarState
+        self.delegate = delegate
+    }
 
     // The pwd of the focused surface as a URL
     private var pwdURL: URL? {
@@ -103,6 +120,15 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                         }
                         .frame(idealWidth: lastFocusedSurface?.value?.initialSize?.width,
                                idealHeight: lastFocusedSurface?.value?.initialSize?.height)
+                        // Mount the Sidecar on terminal content, below any
+                        // window-level banners. The VStack automatically
+                        // reserves the real banner height, including dynamic
+                        // type and localization changes.
+                        .terminalSidecar(
+                            state: sidecarState,
+                            surfaceView: lastFocusedSurface?.value,
+                            ghostty: ghostty
+                        )
                 }
                 // Ignore safe area to extend up in to the titlebar region if we have the "hidden" titlebar style
                 .ignoresSafeArea(.container, edges: ghostty.config.macosTitlebarStyle == .hidden ? .top : [])
@@ -112,6 +138,7 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                         surfaceView: surfaceView,
                         isPresented: $viewModel.commandPaletteIsShowing,
                         ghosttyConfig: ghostty.config,
+                        sidecarState: sidecarState,
                         updateViewModel: (NSApp.delegate as? AppDelegate)?.updateViewModel) { action in
                         self.delegate?.performAction(action, on: surfaceView)
                     }

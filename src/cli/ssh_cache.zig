@@ -89,7 +89,7 @@ pub fn run(alloc_gpa: Allocator) !u8 {
             if (is_host_flag) {
                 try stderr.print(
                     "Warning: --host is deprecated; pass the destination " ++
-                        "directly, e.g. `ghostty +ssh-cache {s}`.\n",
+                        "directly, e.g. `osutty +ssh-cache {s}`.\n",
                     .{arg["--host=".len..]},
                 );
             }

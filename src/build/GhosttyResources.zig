@@ -143,7 +143,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+fish");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(.{}), "ghostty.fish");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "osutty.fish");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -158,7 +158,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+zsh");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(.{}), "_ghostty");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "_osutty");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -173,7 +173,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+bash");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(.{}), "ghostty.bash");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "osutty.bash");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -265,7 +265,7 @@ fn addLinuxAppResources(
     // Background:
     // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
 
-    const name = b.fmt("Ghostty{s}", .{
+    const name = b.fmt("Osutty{s}", .{
         switch (cfg.optimize) {
             .Debug, .ReleaseSafe => " (Debug)",
             .ReleaseFast, .ReleaseSmall => "",
@@ -280,7 +280,7 @@ fn addLinuxAppResources(
     });
 
     const exe_abs_path = b.fmt(
-        "{s}/bin/ghostty",
+        "{s}/bin/osutty",
         .{b.install_prefix},
     );
 
