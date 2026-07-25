@@ -51,6 +51,9 @@ class BaseTerminalController: NSWindowController,
     /// Set if the terminal view should show the update overlay.
     @Published var updateOverlayIsVisible: Bool = false
 
+    /// Window-scoped state for the optional workspace sidecar.
+    let sidecarState = SidecarState()
+
     /// True when any surface in this controller currently has an active bell.
     @Published private(set) var bell: Bool = false
 
@@ -816,6 +819,18 @@ class BaseTerminalController: NSWindowController,
         return event
     }
 
+    @IBAction func toggleSidecar(_ sender: Any?) {
+        sidecarState.toggle()
+    }
+
+    @IBAction func showSidecarPanel(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem,
+              let panel = SidecarPanel(menuTag: item.tag) else {
+            return
+        }
+        sidecarState.show(panel)
+    }
+
     // MARK: TerminalViewDelegate
 
     func focusedSurfaceDidChange(to: Ghostty.SurfaceView?) {
@@ -1504,6 +1519,15 @@ extension BaseTerminalController: NSMenuItemValidation {
         switch item.action {
         case #selector(findHide):
             return focusedSurface?.searchState != nil
+
+        case #selector(toggleSidecar):
+            item.state = sidecarState.isVisible ? .on : .off
+            return true
+
+        case #selector(showSidecarPanel):
+            item.state = sidecarState.isVisible
+                && item.tag == sidecarState.selectedPanel.menuTag ? .on : .off
+            return true
 
         default:
             return true

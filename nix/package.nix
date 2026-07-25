@@ -104,7 +104,7 @@ in
     postInstall = ''
       terminfo_src=${
         if stdenv.hostPlatform.isDarwin
-        then ''"$out/Applications/Ghostty.app/Contents/Resources/terminfo"''
+        then ''"$out/Applications/Osutty.app/Contents/Resources/terminfo"''
         else "$out/share/terminfo"
       }
 
@@ -136,6 +136,6 @@ in
         "x86_64-linux"
         "aarch64-linux"
       ];
-      mainProgram = "ghostty";
+      mainProgram = "osutty";
     };
   })

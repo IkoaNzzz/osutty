@@ -172,3 +172,15 @@ pub fn open(io: std.Io, path: []const u8) OpenFileError!std.Io.File {
 
     return file;
 }
+
+test "macOS configuration path remains Ghostty-compatible" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+
+    const path = try defaultAppSupportPath(std.testing.allocator);
+    defer std.testing.allocator.free(path);
+    try std.testing.expect(std.mem.endsWith(
+        u8,
+        path,
+        "com.mitchellh.ghostty/config.ghostty",
+    ));
+}

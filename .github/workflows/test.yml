@@ -852,19 +852,19 @@ jobs:
         run: nix build .#ghostty-releasefast
 
       - name: Check version
-        run: result/bin/ghostty +version | grep -q '.ReleaseFast'
+        run: result/bin/osutty +version | grep -q '.ReleaseFast'
 
       - name: Check to see if the binary has been stripped
-        run: nm result/bin/.ghostty-wrapped 2>&1 | grep -q 'no symbols'
+        run: nm result/bin/.osutty-wrapped 2>&1 | grep -q 'no symbols'
 
       - name: Test debug NixOS package build
         run: nix build .#ghostty-debug
 
       - name: Check version
-        run: result/bin/ghostty +version | grep -q '.Debug'
+        run: result/bin/osutty +version | grep -q '.Debug'
 
       - name: Check to see if the binary has not been stripped
-        run: nm result/bin/.ghostty-wrapped 2>&1 | grep -q 'main_ghostty.main'
+        run: nm result/bin/.osutty-wrapped 2>&1 | grep -q 'main_ghostty.main'
 
       - name: Test ReleaseFast build of libghostty-vt
         run: |
@@ -1119,7 +1119,7 @@ jobs:
       # The native app is built with native Xcode tooling. This also does
       # codesigning. IMPORTANT: this must NOT run in a Nix environment.
       # Nix breaks xcodebuild so this has to be run outside.
-      - name: Build Ghostty.app
+      - name: Build Osutty.app
         run: |
           cd macos
           xcodebuild -target Ghostty \
@@ -1995,4 +1995,4 @@ jobs:
   #       run: |
   #         cd $GITHUB_WORKSPACE
   #         zig build
-  #         ./zig-out/bin/ghostty +version
+  #         ./zig-out/bin/osutty +version

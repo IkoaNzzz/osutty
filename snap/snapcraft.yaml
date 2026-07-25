@@ -19,9 +19,9 @@ platforms:
 
 apps:
   ghostty:
-    command: bin/ghostty
+    command: bin/osutty
     command-chain: [app/launcher]
-    completer: share/bash-completion/completions/ghostty.bash
+    completer: share/bash-completion/completions/osutty.bash
     desktop: share/applications/com.mitchellh.ghostty.desktop
     #refresh-mode: ignore-running # Store rejects this, needs fix in review-tools
     environment:

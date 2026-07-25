@@ -24,6 +24,9 @@ class TerminalWindow: NSWindow {
     /// Update notification UI in titlebar
     private let updateAccessory = NSTitlebarAccessoryViewController()
 
+    /// Window-level Sidecar toggle in the trailing titlebar area.
+    private let sidecarAccessory = NSTitlebarAccessoryViewController()
+
     /// Visual indicator that mirrors the selected tab color.
     private lazy var tabColorIndicator: NSHostingView<TabColorIndicatorView> = {
         let view = NSHostingView(rootView: TabColorIndicatorView(tabColor: tabColor))
@@ -152,6 +155,16 @@ class TerminalWindow: NSWindow {
                 ))
                 addTitlebarAccessoryViewController(updateAccessory)
                 updateAccessory.view.translatesAutoresizingMaskIntoConstraints = false
+            }
+
+            if let sidecarState = terminalController?.sidecarState {
+                sidecarAccessory.layoutAttribute = .right
+                sidecarAccessory.view = NonDraggableHostingView(rootView: SidecarToggleAccessoryView(
+                    viewModel: viewModel,
+                    state: sidecarState
+                ))
+                addTitlebarAccessoryViewController(sidecarAccessory)
+                sidecarAccessory.view.translatesAutoresizingMaskIntoConstraints = false
             }
         }
 
@@ -674,6 +687,21 @@ extension TerminalWindow {
             UpdatePill(model: model)
                 .padding(.top, viewModel.accessoryTopPadding)
                 .padding(.trailing, viewModel.accessoryTopPadding)
+        }
+    }
+
+    struct SidecarToggleAccessoryView: View {
+        @ObservedObject var viewModel: ViewModel
+        @ObservedObject var state: SidecarState
+
+        var body: some View {
+            VStack {
+                SidecarToggleButton(state: state)
+                    .opacity(viewModel.isMainWindow ? 1 : 0.65)
+                Spacer()
+            }
+            .padding(.top, viewModel.accessoryTopPadding)
+            .padding(.trailing, viewModel.accessoryTopPadding)
         }
     }
 
