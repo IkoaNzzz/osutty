@@ -10,17 +10,20 @@ struct SidecarView: View {
     @ObservedObject var selection: SidecarSelectionState
     let surface: SidecarSurfaceContext?
     let resourceMonitor: SidecarResourceMonitor
+    let quickEditorManager: SidecarQuickEditorManager
     let usesExternalChrome: Bool
 
     init(
         selection: SidecarSelectionState,
         surface: SidecarSurfaceContext?,
         resourceMonitor: SidecarResourceMonitor,
+        quickEditorManager: SidecarQuickEditorManager,
         usesExternalChrome: Bool = false
     ) {
         self.selection = selection
         self.surface = surface
         self.resourceMonitor = resourceMonitor
+        self.quickEditorManager = quickEditorManager
         self.usesExternalChrome = usesExternalChrome
     }
 
@@ -84,7 +87,8 @@ struct SidecarView: View {
         case .files:
             SidecarFilesView(
                 model: filesModel,
-                surface: surface
+                surface: surface,
+                quickEditorManager: quickEditorManager
             )
         }
     }

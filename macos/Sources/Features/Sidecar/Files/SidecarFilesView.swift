@@ -4,6 +4,7 @@ import SwiftUI
 struct SidecarFilesView: View {
     @ObservedObject var model: SidecarFilesModel
     @ObservedObject var surface: SidecarSurfaceContext
+    @ObservedObject var quickEditorManager: SidecarQuickEditorManager
     @StateObject private var quickLook = SidecarQuickLookController()
     @FocusState private var focusedControl: FocusTarget?
 
@@ -46,6 +47,15 @@ struct SidecarFilesView: View {
         .task(id: terminalDirectory) {
             guard let terminalDirectory else { return }
             model.setTerminalRoot(terminalDirectory)
+        }
+        .task(id: model.searchQuery) {
+            guard !model.searchQuery.isEmpty else {
+                model.search()
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            model.search()
         }
         .onChange(of: model.showsHiddenFiles) { _ in
             model.reloadForVisibilityChange()
@@ -169,7 +179,7 @@ struct SidecarFilesView: View {
             SidecarEmptyView(
                 title: "No Results",
                 systemImage: "magnifyingglass",
-                description: "Press Return to search this folder."
+                description: "No matching files in this folder."
             )
         } else {
             ScrollView {
@@ -252,7 +262,7 @@ struct SidecarFilesView: View {
             }
         }
         .contextMenu {
-            fileContextMenu(row.entry)
+            contextMenu(for: row.entry)
         }
     }
 
@@ -276,7 +286,7 @@ struct SidecarFilesView: View {
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
-                Text(entry.name)
+                    Text(entry.name)
                         .font(.system(size: 11))
                         .lineLimit(1)
                     Text(entry.relativePath(from: model.root))
@@ -300,23 +310,18 @@ struct SidecarFilesView: View {
             isSelected: model.selection == entry.url
         ))
         .contextMenu {
-            fileContextMenu(entry)
+            contextMenu(for: entry)
         }
     }
 
-    @ViewBuilder
-    private func fileContextMenu(_ entry: SidecarFileEntry) -> some View {
-        if !entry.isDirectory {
-            Button("Quick Look") {
-                quickLook.preview(entry.url)
-            }
-        }
-        Button("Open") {
-            NSWorkspace.shared.open(entry.url)
-        }
-        Button("Reveal in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([entry.url])
-        }
+    private func contextMenu(for entry: SidecarFileEntry) -> some View {
+        SidecarFileContextMenu(
+            entry: entry,
+            surfaceID: surface.surfaceView.id,
+            model: model,
+            quickLook: quickLook,
+            quickEditorManager: quickEditorManager
+        )
     }
 
     private func quickLookSelection() {
@@ -346,6 +351,7 @@ struct SidecarFilesView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.browse(url)
     }
+
 }
 
 private struct SidecarFileHoverRow<Content: View>: View {
@@ -417,14 +423,6 @@ private extension SidecarFileEntry {
         if isSymbolicLink { return "arrow.turn.up.right" }
         if isDirectory { return "folder" }
         return "doc"
-    }
-
-    func relativePath(from root: URL?) -> String {
-        guard let root else { return url.path }
-        let rootPath = root.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        guard path.hasPrefix(rootPath + "/") else { return path }
-        return String(path.dropFirst(rootPath.count + 1))
     }
 }
 

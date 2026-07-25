@@ -32,6 +32,7 @@ final class SidecarState {
     let presentation: SidecarPresentationState
     let selection: SidecarSelectionState
     let resourceMonitor: SidecarResourceMonitor
+    let quickEditorManager: SidecarQuickEditorManager
 
     var isVisible: Bool {
         get { presentation.isVisible }
@@ -63,6 +64,7 @@ final class SidecarState {
         )
         self.selection = .init(selectedPanel: selectedPanel)
         self.resourceMonitor = .init()
+        self.quickEditorManager = .init()
     }
 
     func show(_ panel: SidecarPanel) {

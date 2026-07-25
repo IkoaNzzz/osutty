@@ -459,7 +459,7 @@ struct SidecarFileServiceTests {
             contents: Data()
         ))
 
-        let service = SidecarFileService()
+        let service = SidecarFileService(prefersAcceleratedSearch: false)
         let visible = try await service.children(of: root, showsHiddenFiles: false)
         let all = try await service.children(of: root, showsHiddenFiles: true)
 
@@ -481,7 +481,7 @@ struct SidecarFileServiceTests {
             ))
         }
 
-        let service = SidecarFileService()
+        let service = SidecarFileService(prefersAcceleratedSearch: false)
         let results = await service.search(
             in: root,
             query: "MATCH",
@@ -491,6 +491,139 @@ struct SidecarFileServiceTests {
 
         #expect(results.count == 1)
         #expect(results[0].name.localizedCaseInsensitiveContains("match"))
+    }
+
+    @Test func searchRanksFileNamesAheadOfPathOnlyMatches() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let pathMatch = root.appending(path: "service", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: pathMatch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(FileManager.default.createFile(
+            atPath: pathMatch.appending(path: "unrelated.swift").path,
+            contents: Data()
+        ))
+        #expect(FileManager.default.createFile(
+            atPath: root.appending(path: "ServiceClient.swift").path,
+            contents: Data()
+        ))
+
+        let service = SidecarFileService(prefersAcceleratedSearch: false)
+        let results = await service.search(
+            in: root,
+            query: "service",
+            showsHiddenFiles: false
+        )
+
+        let fileNameRank = try #require(results.firstIndex {
+            $0.name == "ServiceClient.swift"
+        })
+        let pathOnlyRank = try #require(results.firstIndex {
+            $0.name == "unrelated.swift"
+        })
+        #expect(fileNameRank < pathOnlyRank)
+    }
+
+    @Test func searchSupportsFuzzySubsequences() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(FileManager.default.createFile(
+            atPath: root.appending(path: "SidecarFileService.swift").path,
+            contents: Data()
+        ))
+
+        let service = SidecarFileService(prefersAcceleratedSearch: false)
+        let results = await service.search(
+            in: root,
+            query: "scfsvc",
+            showsHiddenFiles: false
+        )
+
+        #expect(results.first?.name == "SidecarFileService.swift")
+    }
+}
+
+struct SidecarFileOperationServiceTests {
+    @Test func createsAndRenamesFilesAndFolders() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let service = SidecarFileOperationService()
+        let file = try await service.createFile(named: "draft.txt", in: root)
+        let folder = try await service.createDirectory(named: "Sources", in: root)
+        let renamed = try await service.rename(file, to: "final.txt")
+        let caseRenamed = try await service.rename(renamed, to: "FINAL.txt")
+
+        #expect(FileManager.default.fileExists(atPath: caseRenamed.path))
+        #expect(caseRenamed.lastPathComponent == "FINAL.txt")
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        #expect(FileManager.default.fileExists(atPath: folder.path))
+    }
+}
+
+@MainActor
+struct SidecarQuickEditorTests {
+    @Test func loadsTracksEditsSavesAndCloses() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let file = root.appending(path: "example.swift")
+        let symlink = root.appending(path: "example-link.swift")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("let value = 1\n".utf8).write(to: file)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: file.path
+        )
+        try FileManager.default.createSymbolicLink(
+            at: symlink,
+            withDestinationURL: file
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let manager = SidecarQuickEditorManager()
+        let surfaceID = UUID()
+        manager.open(symlink, on: surfaceID)
+
+        #expect(await eventually {
+            manager.document(for: surfaceID)?.state == .ready
+        })
+        let document = try #require(manager.document(for: surfaceID))
+        #expect(document.text == "let value = 1\n")
+        #expect(!document.isDirty)
+
+        document.replaceText("let value = 2\n")
+        #expect(document.isDirty)
+        try await manager.save(document)
+
+        #expect(!document.isDirty)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "let value = 2\n")
+        let permissions = try #require(
+            FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions]
+                as? NSNumber
+        )
+        #expect(permissions.intValue & 0o111 == 0o111)
+        #expect(try symlink.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true)
+
+        manager.close(surfaceID: surfaceID)
+        #expect(manager.document(for: surfaceID) == nil)
+    }
+
+    private func eventually(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<100 {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return condition()
     }
 }
 
