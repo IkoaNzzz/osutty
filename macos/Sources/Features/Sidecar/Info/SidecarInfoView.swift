@@ -4,13 +4,19 @@ import SwiftUI
 struct SidecarInfoView: View {
     @ObservedObject var surface: SidecarSurfaceContext
 
-    @State private var processSnapshot = SidecarProcessSnapshot.empty
-    @State private var resourceHistory = SidecarResourceHistory()
-    @State private var isResourcesExpanded = false
+    private let monitor: SidecarResourceMonitor
 
     private var workingDirectory: URL? {
         guard let pwd = surface.pwd, !pwd.isEmpty else { return nil }
         return URL(fileURLWithPath: pwd, isDirectory: true)
+    }
+
+    init(
+        surface: SidecarSurfaceContext,
+        monitor: SidecarResourceMonitor
+    ) {
+        self.surface = surface
+        self.monitor = monitor
     }
 
     var body: some View {
@@ -19,42 +25,25 @@ struct SidecarInfoView: View {
                 alignment: .leading,
                 spacing: SidecarMetrics.sectionSpacing
             ) {
-                workspaceSection
-                SidecarResourceSection(
-                    snapshot: processSnapshot,
-                    history: resourceHistory,
-                    isExpanded: $isResourcesExpanded
+                SidecarWorkspaceSection(
+                    workingDirectory: workingDirectory
                 )
-                SidecarProcessSection(
-                    snapshot: processSnapshot,
-                    showsResourceUsage: isResourcesExpanded
+                SidecarInfoLiveSections(
+                    surface: surface,
+                    monitor: monitor
                 )
-                portsSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
             .padding(.bottom, SidecarMetrics.contentPadding)
         }
-        .onChange(of: surface.id) { _ in
-            processSnapshot = .empty
-            resourceHistory = SidecarResourceHistory()
-        }
-        .onChange(of: isResourcesExpanded) { isExpanded in
-            if isExpanded {
-                resourceHistory = SidecarResourceHistory()
-            }
-        }
-        .task(id: refreshTaskID) {
-            await refreshProcessLoop()
-        }
     }
+}
 
-    private var refreshTaskID: String {
-        "\(surface.id):\(isResourcesExpanded)"
-    }
+private struct SidecarWorkspaceSection: View {
+    let workingDirectory: URL?
 
-    @ViewBuilder
-    private var workspaceSection: some View {
+    var body: some View {
         SidecarSection("Working Directory") {
             if let workingDirectory {
                 Text(workingDirectory.abbreviatingWithTilde)
@@ -67,36 +56,98 @@ struct SidecarInfoView: View {
                     title: "Copy Path",
                     systemImage: "doc.on.doc"
                 ) {
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(
-                        workingDirectory.path,
-                        forType: .string
-                    )
+                    copyPath(workingDirectory)
                 }
 
                 SidecarActionButton(
                     title: "Reveal in Finder",
                     systemImage: "folder"
                 ) {
-                    NSWorkspace.shared.activateFileViewerSelecting([
-                        workingDirectory,
-                    ])
+                    reveal(workingDirectory)
                 }
 
-                ForEach(SidecarEditorCatalog.infoEditors) { editor in
-                    SidecarActionButton(
-                        title: "Open in \(editor.name)",
-                        systemImage: "arrow.up.forward.app"
-                    ) {
-                        open(workingDirectory, in: editor)
-                    }
+                SidecarEditorMenu(
+                    editors: SidecarEditorCatalog.infoEditors
+                ) { editor in
+                    open(workingDirectory, in: editor)
                 }
             } else {
                 Text("Waiting for shell integration to report a directory.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func copyPath(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url.path, forType: .string)
+    }
+
+    private func reveal(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func open(_ url: URL, in editor: SidecarEditor) {
+        guard let applicationURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: editor.bundleIdentifier
+        ) else {
+            return
+        }
+
+        NSWorkspace.shared.open(
+            [url],
+            withApplicationAt: applicationURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
+}
+
+private struct SidecarInfoLiveSections: View {
+    @ObservedObject var surface: SidecarSurfaceContext
+    @ObservedObject var monitor: SidecarResourceMonitor
+    @ObservedObject private var monitorEntry: SidecarResourceMonitorEntry
+
+    private var processSnapshot: SidecarProcessSnapshot {
+        monitorEntry.value.snapshot
+    }
+
+    private var resourceHistory: SidecarResourceHistory {
+        monitorEntry.value.history
+    }
+
+    private var refreshTaskID: String {
+        "\(surface.id):\(monitor.isEnabled)"
+    }
+
+    init(
+        surface: SidecarSurfaceContext,
+        monitor: SidecarResourceMonitor
+    ) {
+        self.surface = surface
+        self.monitor = monitor
+        self.monitorEntry = monitor.entry(for: surface.surfaceView)
+    }
+
+    var body: some View {
+        Group {
+            SidecarResourceSection(
+                snapshot: processSnapshot,
+                history: resourceHistory,
+                isExpanded: $monitor.isEnabled
+            )
+            .task(id: refreshTaskID) {
+                monitor.activate(surface.surfaceView)
+                await refreshProcessLoop()
+            }
+
+            SidecarProcessSection(
+                snapshot: processSnapshot,
+                showsResourceUsage: monitor.isEnabled
+            )
+
+            portsSection
         }
     }
 
@@ -115,12 +166,7 @@ struct SidecarInfoView: View {
                         subtitle: "PID \(endpoint.pid)"
                     ) {
                         Button {
-                            let pasteboard = NSPasteboard.general
-                            pasteboard.clearContents()
-                            pasteboard.setString(
-                                String(endpoint.port),
-                                forType: .string
-                            )
+                            copyPort(endpoint.port)
                         } label: {
                             Image(systemName: "doc.on.doc")
                         }
@@ -132,56 +178,46 @@ struct SidecarInfoView: View {
         }
     }
 
-    private func open(_ url: URL, in editor: SidecarEditor) {
-        guard let applicationURL = NSWorkspace.shared.urlForApplication(
-            withBundleIdentifier: editor.bundleIdentifier
-        ) else {
-            return
-        }
-
-        NSWorkspace.shared.open(
-            [url],
-            withApplicationAt: applicationURL,
-            configuration: NSWorkspace.OpenConfiguration()
-        )
+    private func copyPort(_ port: UInt16) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(String(port), forType: .string)
     }
 
     private func refreshProcessLoop() async {
-        var emptyRefreshes = 0
+        guard !monitor.isEnabled else { return }
 
         while !Task.isCancelled {
-            let foregroundPID = surface.surfaceView.surfaceModel?.foregroundPID
-            let refreshed = await SidecarProcessService.shared.snapshot(
-                foregroundPID: foregroundPID,
-                includeResources: isResourcesExpanded
-            )
-            guard !Task.isCancelled else { return }
-
-            if refreshed != processSnapshot {
-                processSnapshot = refreshed
-            }
-            if isResourcesExpanded {
-                resourceHistory.append(refreshed.resources)
-            }
-
-            let delay: Duration
-            if !isResourcesExpanded {
-                emptyRefreshes = 0
-                delay = .seconds(2)
-            } else if refreshed.processes.isEmpty {
-                emptyRefreshes = min(emptyRefreshes + 1, 2)
-                delay = .seconds(emptyRefreshes + 1)
-            } else {
-                emptyRefreshes = 0
-                delay = .seconds(1)
-            }
+            await monitor.refreshBasic(surfaceView: surface.surfaceView)
 
             do {
-                try await Task.sleep(for: delay)
+                try await Task.sleep(for: .seconds(2))
             } catch {
                 return
             }
         }
+    }
+}
+
+private struct SidecarCompactControlStyle: ViewModifier {
+    let isHovering: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .frame(height: 20)
+            .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+            .background {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.12 : 0))
+            }
+            .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    func sidecarCompactControl(isHovering: Bool) -> some View {
+        modifier(SidecarCompactControlStyle(isHovering: isHovering))
     }
 }
 
@@ -223,50 +259,49 @@ private struct SidecarResourceSection: View {
     let history: SidecarResourceHistory
     @Binding var isExpanded: Bool
 
+    @State private var isMonitorHovering = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 5) {
-                Text("Resources")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 4)
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.16)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(
-                                isExpanded
-                                    ? Color.green.opacity(0.8)
-                                    : Color.secondary.opacity(0.45)
-                            )
-                            .frame(width: 5, height: 5)
-
-                        Text(isExpanded ? "Live" : "Monitor")
-                            .font(.system(size: 9, weight: .medium))
-
-                        Image(
-                            systemName: isExpanded
-                                ? "chevron.up"
-                                : "chevron.down"
-                        )
-                        .font(.system(size: 7, weight: .semibold))
-                    }
-                    .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
+        SidecarSection("Resources", accessory: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    isExpanded.toggle()
                 }
-                .buttonStyle(.plain)
-                .help(
-                    isExpanded
-                        ? "Pause monitoring and collapse"
-                        : "Start live resource monitoring"
-                )
-            }
+            } label: {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(
+                            isExpanded
+                                ? Color.green.opacity(0.8)
+                                : Color.secondary.opacity(0.45)
+                        )
+                        .frame(width: 5, height: 5)
 
+                    Text(isExpanded ? "Live" : "Monitor")
+                        .font(.system(size: 9, weight: .medium))
+
+                    Image(
+                        systemName: isExpanded
+                            ? "chevron.up"
+                            : "chevron.down"
+                    )
+                    .font(.system(size: 7, weight: .semibold))
+                }
+                .sidecarCompactControl(isHovering: isMonitorHovering)
+            }
+            .buttonStyle(.plain)
+            .sidecarFocusEffectDisabled()
+            .help(
+                isExpanded
+                    ? "Pause monitoring and collapse"
+                    : "Start live resource monitoring"
+            )
+            .onHover { isMonitorHovering = $0 }
+            .animation(
+                SidecarMetrics.contentAnimation,
+                value: isMonitorHovering
+            )
+        }, content: {
             if isExpanded {
                 if snapshot.processes.isEmpty {
                     Text("No foreground process")
@@ -278,8 +313,7 @@ private struct SidecarResourceSection: View {
                     processSummary
                 }
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        })
     }
 
     @ViewBuilder
