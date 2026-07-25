@@ -117,66 +117,60 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
         panelWidth: CGFloat,
         availableWidth: CGFloat
     ) -> some View {
-        ZStack {
-            Color.clear
-                .contentShape(Rectangle())
+        Color.clear
+            .contentShape(Rectangle())
+            .frame(width: SidecarLayout.resizeHitWidth)
+            .frame(maxHeight: .infinity)
+            .backport.pointerStyle(.resizeLeftRight)
+            .onHover { isHovered in
+                if #available(macOS 15, *) {
+                    return
+                }
 
-            Rectangle()
-                .fill(Color.primary.opacity(0.14))
-                .frame(width: 1)
-        }
-        .frame(width: SidecarLayout.resizeHitWidth)
-        .frame(maxHeight: .infinity)
-        .backport.pointerStyle(.resizeLeftRight)
-        .onHover { isHovered in
-            if #available(macOS 15, *) {
-                return
+                if isHovered {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
             }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if dragStartWidth == nil {
+                            dragStartWidth = panelWidth
+                        }
 
-            if isHovered {
-                NSCursor.resizeLeftRight.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if dragStartWidth == nil {
-                        dragStartWidth = panelWidth
+                        sidecarWidth = SidecarLayout.width(
+                            from: dragStartWidth ?? panelWidth,
+                            horizontalTranslation: value.translation.width,
+                            availableWidth: availableWidth
+                        )
                     }
-
-                    sidecarWidth = SidecarLayout.width(
-                        from: dragStartWidth ?? panelWidth,
-                        horizontalTranslation: value.translation.width,
-                        availableWidth: availableWidth
-                    )
-                }
-                .onEnded { _ in
-                    dragStartWidth = nil
-                }
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Sidecar resize divider")
-        .accessibilityValue("\(Int(panelWidth)) points")
-        .accessibilityHint("Drag to resize the Sidecar")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAdjustableAction { direction in
-            let adjustment: CGFloat
-            switch direction {
-            case .increment:
-                adjustment = SidecarLayout.accessibilityWidthStep
-            case .decrement:
-                adjustment = -SidecarLayout.accessibilityWidthStep
-            @unknown default:
-                return
-            }
-
-            sidecarWidth = SidecarLayout.clampedWidth(
-                panelWidth + adjustment,
-                availableWidth: availableWidth
+                    .onEnded { _ in
+                        dragStartWidth = nil
+                    }
             )
-        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Sidecar resize divider")
+            .accessibilityValue("\(Int(panelWidth)) points")
+            .accessibilityHint("Drag to resize the Sidecar")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAdjustableAction { direction in
+                let adjustment: CGFloat
+                switch direction {
+                case .increment:
+                    adjustment = SidecarLayout.accessibilityWidthStep
+                case .decrement:
+                    adjustment = -SidecarLayout.accessibilityWidthStep
+                @unknown default:
+                    return
+                }
+
+                sidecarWidth = SidecarLayout.clampedWidth(
+                    panelWidth + adjustment,
+                    availableWidth: availableWidth
+                )
+            }
     }
 
     private func clampedOpacity(_ opacity: Double) -> Double {
