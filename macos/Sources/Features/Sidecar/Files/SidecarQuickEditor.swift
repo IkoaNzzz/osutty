@@ -248,18 +248,29 @@ struct SidecarQuickEditorPane: View {
 
             Spacer(minLength: 12)
 
-            Button(saveTitle) {
+            Button {
                 save()
+            } label: {
+                Label(saveTitle, systemImage: "checkmark")
             }
+            .buttonStyle(SidecarQuickEditorToolbarButtonStyle())
+            .sidecarFocusEffectDisabled()
             .keyboardShortcut("s", modifiers: .command)
             .disabled(!document.isDirty || document.isSaving || document.state != .ready)
+            .help(saveTitle)
+            .accessibilityLabel(saveTitle)
 
-            Button("Close") {
+            Button {
                 close()
+            } label: {
+                Label("Close", systemImage: "xmark")
             }
+            .buttonStyle(SidecarQuickEditorToolbarButtonStyle())
+            .sidecarFocusEffectDisabled()
             .disabled(document.isSaving)
+            .help("Close")
+            .accessibilityLabel("Close Quick Editor")
         }
-        .buttonStyle(.borderless)
         .controlSize(.small)
         .padding(.horizontal, 12)
         .frame(height: 34)
@@ -322,6 +333,45 @@ struct SidecarQuickEditorPane: View {
 
     private func present(_ error: Error) {
         NSAlert(error: error).runModal()
+    }
+}
+
+private struct SidecarQuickEditorToolbarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> Body {
+        Body(configuration: configuration)
+    }
+
+    struct Body: View {
+        let configuration: Configuration
+
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 11, weight: .medium))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: 24)
+                .background {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(backgroundColor)
+                }
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : 0.45)
+                .onHover { isHovering = $0 }
+                .animation(SidecarMetrics.contentAnimation, value: isHovering)
+                .animation(SidecarMetrics.contentAnimation, value: configuration.isPressed)
+        }
+
+        private var backgroundColor: Color {
+            guard isEnabled else { return .clear }
+            if configuration.isPressed {
+                return Color.primary.opacity(0.13)
+            }
+            return Color.primary.opacity(isHovering ? 0.08 : 0)
+        }
     }
 }
 
