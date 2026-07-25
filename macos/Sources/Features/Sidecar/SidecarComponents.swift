@@ -130,24 +130,41 @@ struct SidecarToggleButton: View {
     }
 }
 
-struct SidecarSection<Content: View>: View {
+struct SidecarSection<Content: View, Accessory: View>: View {
     let title: String
+    let accessory: Accessory
     let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(
+        _ title: String,
+        @ViewBuilder accessory: () -> Accessory,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
+        self.accessory = accessory()
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 4)
+                accessory
+            }
 
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension SidecarSection where Accessory == EmptyView {
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.init(title, accessory: { EmptyView() }, content: content)
     }
 }
 

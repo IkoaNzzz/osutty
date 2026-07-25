@@ -306,12 +306,14 @@ extension View {
     func terminalSidecar(
         state: SidecarState,
         surfaceView: Ghostty.SurfaceView?,
+        surfaceViews: [Ghostty.SurfaceView],
         ghostty: Ghostty.App
     ) -> some View {
         modifier(SidecarHostModifier(
             state: state,
             presentation: state.presentation,
             surfaceView: surfaceView,
+            surfaceViews: surfaceViews,
             ghostty: ghostty
         ))
     }
@@ -321,6 +323,7 @@ private struct SidecarHostModifier: ViewModifier {
     let state: SidecarState
     @ObservedObject var presentation: SidecarPresentationState
     let surfaceView: Ghostty.SurfaceView?
+    let surfaceViews: [Ghostty.SurfaceView]
     let ghostty: Ghostty.App
 
     @ViewBuilder
@@ -331,6 +334,7 @@ private struct SidecarHostModifier: ViewModifier {
                 state: state,
                 presentation: presentation,
                 surfaceView: surfaceView,
+                surfaceViews: surfaceViews,
                 ghostty: ghostty
             )
         } else {
@@ -346,6 +350,7 @@ private struct SidecarHostModifier: ViewModifier {
                 SidecarView(
                     selection: state.selection,
                     surface: nil,
+                    resourceMonitor: state.resourceMonitor,
                     usesExternalChrome: true
                 )
                 .environmentObject(ghostty)
@@ -360,6 +365,7 @@ private struct SidecarObservedSurfaceHost<Content: View>: View {
     @ObservedObject var presentation: SidecarPresentationState
     @StateObject private var surface: SidecarSurfaceContext
     let surfaceView: Ghostty.SurfaceView
+    let surfaceViews: [Ghostty.SurfaceView]
     let ghostty: Ghostty.App
 
     init(
@@ -367,12 +373,14 @@ private struct SidecarObservedSurfaceHost<Content: View>: View {
         state: SidecarState,
         presentation: SidecarPresentationState,
         surfaceView: Ghostty.SurfaceView,
+        surfaceViews: [Ghostty.SurfaceView],
         ghostty: Ghostty.App
     ) {
         self.content = content
         self.state = state
         self.presentation = presentation
         self.surfaceView = surfaceView
+        self.surfaceViews = surfaceViews
         _surface = StateObject(
             wrappedValue: SidecarSurfaceContext(surfaceView: surfaceView)
         )
@@ -393,6 +401,7 @@ private struct SidecarObservedSurfaceHost<Content: View>: View {
             SidecarView(
                 selection: state.selection,
                 surface: surface,
+                resourceMonitor: state.resourceMonitor,
                 usesExternalChrome: true
             )
             .environmentObject(ghostty)
@@ -400,5 +409,12 @@ private struct SidecarObservedSurfaceHost<Content: View>: View {
         .task(id: surfaceView.id) {
             surface.update(surfaceView: surfaceView)
         }
+        .task(id: surfaceRegistrationIDs) {
+            state.resourceMonitor.register(surfaceViews)
+        }
+    }
+
+    private var surfaceRegistrationIDs: [UUID] {
+        surfaceViews.map(\.id)
     }
 }

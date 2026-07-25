@@ -693,6 +693,63 @@ struct SidecarResourceHistoryTests {
     }
 }
 
+struct SidecarResourceMonitorEntryTests {
+    @Test @MainActor func cachesEachSurfaceIndependently() {
+        let first = SidecarResourceMonitorEntry(surfaceID: UUID())
+        let second = SidecarResourceMonitorEntry(surfaceID: UUID())
+        let snapshot = SidecarProcessSnapshot(
+            processes: [],
+            listeningPorts: [],
+            resources: SidecarResourceSnapshot(
+                cpuPercent: 12,
+                systemCPUPercent: 34,
+                memoryBytes: 56,
+                systemMemoryUsedBytes: 78,
+                systemMemoryTotalBytes: 90,
+                readBytesPerSecond: 1,
+                writeBytesPerSecond: 2,
+                threadCount: 3
+            )
+        )
+
+        first.update(snapshot: snapshot, includesResources: true)
+
+        #expect(first.value.snapshot == snapshot)
+        #expect(first.value.history.currentCPUPercent == [12])
+        #expect(first.value.hasResourceSample)
+        #expect(!second.value.hasResourceSample)
+        #expect(second.value.snapshot == .empty)
+        #expect(second.value.history.currentCPUPercent.isEmpty)
+    }
+
+    @Test @MainActor func basicRefreshKeepsCachedResourceValues() {
+        let entry = SidecarResourceMonitorEntry(surfaceID: UUID())
+        let resourceSnapshot = SidecarProcessSnapshot(
+            processes: [],
+            listeningPorts: [],
+            resources: SidecarResourceSnapshot(
+                cpuPercent: 12,
+                systemCPUPercent: 34,
+                memoryBytes: 56,
+                systemMemoryUsedBytes: 78,
+                systemMemoryTotalBytes: 90,
+                readBytesPerSecond: 1,
+                writeBytesPerSecond: 2,
+                threadCount: 3
+            )
+        )
+        entry.update(
+            snapshot: resourceSnapshot,
+            includesResources: true
+        )
+
+        entry.update(snapshot: .empty, includesResources: false)
+
+        #expect(entry.value.snapshot.resources == resourceSnapshot.resources)
+        #expect(entry.value.history.currentCPUPercent == [12])
+    }
+}
+
 struct SidecarStateTests {
     @Test @MainActor func panelMenuTagsRoundTripAndShowOpensSidecar() {
         for panel in SidecarPanel.allCases {

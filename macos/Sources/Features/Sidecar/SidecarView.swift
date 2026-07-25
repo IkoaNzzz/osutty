@@ -9,15 +9,18 @@ struct SidecarView: View {
 
     @ObservedObject var selection: SidecarSelectionState
     let surface: SidecarSurfaceContext?
+    let resourceMonitor: SidecarResourceMonitor
     let usesExternalChrome: Bool
 
     init(
         selection: SidecarSelectionState,
         surface: SidecarSurfaceContext?,
+        resourceMonitor: SidecarResourceMonitor,
         usesExternalChrome: Bool = false
     ) {
         self.selection = selection
         self.surface = surface
+        self.resourceMonitor = resourceMonitor
         self.usesExternalChrome = usesExternalChrome
     }
 
@@ -64,7 +67,7 @@ struct SidecarView: View {
     private func panelContent(surface: SidecarSurfaceContext) -> some View {
         switch selection.selectedPanel {
         case .info:
-            SidecarInfoView(surface: surface)
+            SidecarInfoView(surface: surface, monitor: resourceMonitor)
 
         case .outline:
             SidecarOutlineView(

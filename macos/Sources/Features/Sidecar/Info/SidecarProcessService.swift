@@ -68,7 +68,9 @@ actor SidecarProcessService {
     private static let samplerCacheDuration: TimeInterval = 300
     private static let systemCacheDuration: TimeInterval = 0.5
 
-    private var processCache: SidecarProcessTreeCache?
+    private var processCaches: [
+        SidecarProcessIdentity: SidecarProcessTreeCache
+    ] = [:]
     private var portCache: [SidecarProcessIdentity: SidecarPortCacheEntry] = [:]
     private var resourceSamplers: [SidecarProcessIdentity: SidecarResourceSampler] = [:]
     private var systemResourceSampler = SidecarSystemResourceSampler()
@@ -87,8 +89,7 @@ actor SidecarProcessService {
         let rootIdentity = SidecarProcessIdentity(root)
         let rootChildren = childPIDs(of: root.pid)
         let descriptors: [SidecarProcessDescriptor]
-        if let cached = processCache,
-           cached.root == rootIdentity,
+        if let cached = processCaches[rootIdentity],
            cached.rootChildren == rootChildren,
            now.timeIntervalSince(cached.loadedAt)
             < Self.processCacheDuration {
@@ -106,12 +107,15 @@ actor SidecarProcessService {
                 refreshed.append(parent)
             }
             descriptors = refreshed
-            processCache = .init(
-                root: rootIdentity,
+            processCaches[rootIdentity] = .init(
                 rootChildren: rootChildren,
                 processes: refreshed,
                 loadedAt: now
             )
+        }
+        processCaches = processCaches.filter {
+            now.timeIntervalSince($0.value.loadedAt)
+                < Self.processCacheDuration
         }
 
         let sampledAt = ProcessInfo.processInfo.systemUptime
@@ -172,8 +176,9 @@ actor SidecarProcessService {
                 ports.formUnion(refreshed)
             }
         }
-        let activeIdentities = Set(descriptors.map(SidecarProcessIdentity.init))
-        portCache = portCache.filter { activeIdentities.contains($0.key) }
+        portCache = portCache.filter {
+            now.timeIntervalSince($0.value.loadedAt) < Self.portCacheDuration
+        }
 
         return SidecarProcessSnapshot(
             processes: processes,
@@ -785,7 +790,6 @@ private struct SidecarSystemResourceCache {
 }
 
 private struct SidecarProcessTreeCache {
-    let root: SidecarProcessIdentity
     let rootChildren: [Int32]
     let processes: [SidecarProcessDescriptor]
     let loadedAt: Date

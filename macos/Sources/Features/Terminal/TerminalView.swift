@@ -127,6 +127,7 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                         .terminalSidecar(
                             state: sidecarState,
                             surfaceView: lastFocusedSurface?.value,
+                            surfaceViews: viewModel.surfaceTree.map { $0 },
                             ghostty: ghostty
                         )
                 }
