@@ -639,6 +639,23 @@ struct SidecarContainerTests {
         )
     }
 
+    @Test func dragWidthUsesStableWholePointUpdates() {
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -10.49,
+                availableWidth: 1_200
+            ) == 234
+        )
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -10.5,
+                availableWidth: 1_200
+            ) == 235
+        )
+    }
+
     @Test func reservedAreaIncludesTrailingCardInset() {
         #expect(
             SidecarLayout.reservedWidth(panelWidth: 224)

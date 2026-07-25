@@ -11,7 +11,7 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
 
     @State private var renderedSidecar: Bool
     @State private var sidecarChromeVisible: Bool
-    @State private var dragStartWidth: CGFloat?
+    @GestureState private var dragTranslation: CGFloat = 0
 
     private let primary: Primary
     private let sidecar: Sidecar
@@ -38,8 +38,9 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let panelWidth = SidecarLayout.clampedWidth(
-                sidecarWidth,
+            let panelWidth = SidecarLayout.width(
+                from: sidecarWidth,
+                horizontalTranslation: dragTranslation,
                 availableWidth: geometry.size.width
             )
             let reservedWidth = isVisible
@@ -135,19 +136,21 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if dragStartWidth == nil {
-                            dragStartWidth = panelWidth
-                        }
-
+                    .updating($dragTranslation) { value, translation, transaction in
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                        translation = value.translation.width
+                    }
+                    .onEnded { value in
+                        // Keep high-frequency drag updates local to this
+                        // container. Publishing the application-scoped width
+                        // on every pointer event invalidates every terminal
+                        // tab and makes split Metal surfaces flicker.
                         sidecarWidth = SidecarLayout.width(
-                            from: dragStartWidth ?? panelWidth,
+                            from: sidecarWidth,
                             horizontalTranslation: value.translation.width,
                             availableWidth: availableWidth
                         )
-                    }
-                    .onEnded { _ in
-                        dragStartWidth = nil
                     }
             )
             .accessibilityElement(children: .ignore)
@@ -211,7 +214,7 @@ enum SidecarLayout {
         clampedWidth(
             initialWidth - horizontalTranslation,
             availableWidth: availableWidth
-        )
+        ).rounded(.toNearestOrAwayFromZero)
     }
 }
 
