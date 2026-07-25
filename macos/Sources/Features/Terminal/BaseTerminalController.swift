@@ -51,8 +51,11 @@ class BaseTerminalController: NSWindowController,
     /// Set if the terminal view should show the update overlay.
     @Published var updateOverlayIsVisible: Bool = false
 
-    /// Window-scoped state for the optional workspace sidecar.
-    let sidecarState = SidecarState()
+    /// Application-scoped state for the optional workspace sidecar.
+    ///
+    /// Native tabs are separate terminal controllers, so owning this here
+    /// would make visibility, panel selection, and width change with the tab.
+    var sidecarState: SidecarState { ghostty.sidecarState }
 
     /// True when any surface in this controller currently has an active bell.
     @Published private(set) var bell: Bool = false

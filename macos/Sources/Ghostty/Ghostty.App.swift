@@ -31,6 +31,15 @@ extension Ghostty {
 
         /// Preferred config file than the default ones
         private var configPath: String?
+
+        #if os(macOS)
+        /// Presentation state shared by every terminal window and native tab.
+        ///
+        /// This intentionally lives on the application object rather than a
+        /// terminal controller so switching tabs never changes Sidecar state.
+        @MainActor lazy var sidecarState = SidecarState()
+        #endif
+
         /// The ghostty app instance. We only have one of these for the entire app, although I guess
         /// in theory you can have multiple... I don't know why you would...
         @Published var app: ghostty_app_t? {

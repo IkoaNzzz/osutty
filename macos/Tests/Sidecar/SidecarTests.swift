@@ -546,7 +546,7 @@ struct SidecarStateTests {
         #expect(state.selectedPanel == .files)
     }
 
-    @Test @MainActor func visibilityActionsUseOneWindowScopedState() {
+    @Test @MainActor func visibilityActionsUseOneApplicationScopedState() {
         let state = SidecarState(isVisible: false)
 
         state.toggle()
@@ -607,6 +607,62 @@ struct SidecarStateTests {
 
 @MainActor
 struct SidecarContainerTests {
+    @Test func widthSupportsOttyStyleResizeRange() {
+        #expect(
+            SidecarLayout.clampedWidth(120, availableWidth: 1_200)
+                == SidecarLayout.minimumWidth
+        )
+        #expect(
+            SidecarLayout.clampedWidth(500, availableWidth: 1_200)
+                == 500
+        )
+        #expect(
+            SidecarLayout.clampedWidth(600, availableWidth: 800)
+                == 400
+        )
+    }
+
+    @Test func dragDirectionMatchesTrailingSidecarDivider() {
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -150,
+                availableWidth: 1_200
+            ) == 374
+        )
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: 100,
+                availableWidth: 1_200
+            ) == SidecarLayout.minimumWidth
+        )
+    }
+
+    @Test func dragWidthUsesStableWholePointUpdates() {
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -10.49,
+                availableWidth: 1_200
+            ) == 234
+        )
+        #expect(
+            SidecarLayout.width(
+                from: 224,
+                horizontalTranslation: -10.5,
+                availableWidth: 1_200
+            ) == 235
+        )
+    }
+
+    @Test func reservedAreaIncludesTrailingCardInset() {
+        #expect(
+            SidecarLayout.reservedWidth(panelWidth: 224)
+                == 224 + SidecarLayout.cardInset
+        )
+    }
+
     @Test func reservedAreaContinuesTerminalThemeBehindFloatingCard() throws {
         let renderer = ImageRenderer(
             content: SidecarContainer(
