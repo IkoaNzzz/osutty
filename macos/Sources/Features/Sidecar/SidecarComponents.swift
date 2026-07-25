@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum SidecarMetrics {
@@ -17,13 +18,80 @@ enum SidecarMetrics {
     static let disclosureAnimation = Animation.easeInOut(duration: 0.16)
 }
 
+struct SidecarEditor: Identifiable {
+    let name: String
+    let bundleIdentifier: String
+
+    var id: String { bundleIdentifier }
+
+    static let visualStudioCode = Self(
+        name: "VS Code",
+        bundleIdentifier: "com.microsoft.VSCode"
+    )
+    static let cursor = Self(
+        name: "Cursor",
+        bundleIdentifier: "com.todesktop.230313mzl4w4u92"
+    )
+    static let xcode = Self(
+        name: "Xcode",
+        bundleIdentifier: "com.apple.dt.Xcode"
+    )
+    static let zed = Self(
+        name: "Zed",
+        bundleIdentifier: "dev.zed.Zed"
+    )
+}
+
+@MainActor
+enum SidecarEditorCatalog {
+    static let infoEditors = installed([
+        .visualStudioCode,
+        .cursor,
+        .xcode,
+        .zed,
+    ])
+    static let gitEditors = installed([
+        .cursor,
+        .visualStudioCode,
+        .xcode,
+        .zed,
+    ])
+
+    private static let installedBundleIdentifiers = Set(
+        [
+            SidecarEditor.visualStudioCode,
+            .cursor,
+            .xcode,
+            .zed,
+        ].compactMap { editor in
+            NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: editor.bundleIdentifier
+            ) == nil ? nil : editor.bundleIdentifier
+        }
+    )
+
+    private static func installed(_ editors: [SidecarEditor]) -> [SidecarEditor] {
+        editors.filter { installedBundleIdentifiers.contains($0.bundleIdentifier) }
+    }
+}
+
 struct SidecarToggleButton: View {
-    @ObservedObject var state: SidecarState
+    @ObservedObject var presentation: SidecarPresentationState
+    @ObservedObject var ghostty: Ghostty.App
 
     @State private var isHovering = false
 
     private var actionTitle: String {
-        state.isVisible ? "Hide Sidecar" : "Show Sidecar"
+        presentation.isVisible ? "Hide Sidecar" : "Show Sidecar"
+    }
+
+    private var helpTitle: String {
+        guard let shortcut = ghostty.config.keyboardShortcut(
+            for: SidecarBindingAction.toggle.configValue
+        ) else {
+            return actionTitle
+        }
+        return "\(actionTitle) (\(shortcut))"
     }
 
     var body: some View {
@@ -31,16 +99,16 @@ struct SidecarToggleButton: View {
             Color.clear
 
             Button {
-                state.toggle()
+                presentation.isVisible.toggle()
             } label: {
                 Image(systemName: "sidebar.right")
                     .imageScale(.medium)
-                    .foregroundStyle(state.isVisible ? Color.accentColor : Color.primary)
+                    .foregroundStyle(presentation.isVisible ? Color.accentColor : Color.primary)
                     .frame(width: 24, height: 24)
                     .background {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(
-                                state.isVisible
+                                presentation.isVisible
                                     ? Color.accentColor.opacity(0.18)
                                     : Color.primary.opacity(0.06)
                             )
@@ -48,7 +116,7 @@ struct SidecarToggleButton: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("\(actionTitle) (\(SidecarShortcut.keyboardShortcut))")
+            .help(helpTitle)
             .accessibilityLabel(actionTitle)
             .accessibilityIdentifier("sidecar-titlebar-toggle")
             // Keep a near-transparent accessibility target in the titlebar

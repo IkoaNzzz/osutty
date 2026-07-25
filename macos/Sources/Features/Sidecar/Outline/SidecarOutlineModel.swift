@@ -23,21 +23,25 @@ struct SidecarOutlineGroup: Identifiable {
 final class SidecarOutlineModel: ObservableObject {
     @Published private(set) var groups: [SidecarOutlineGroup] = []
     @Published private(set) var isLoading = false
-    @Published private(set) var now = Date()
     @Published private(set) var jumpError: String?
 
     private let service = SidecarOutlineService()
     private var activeSurfaceID: UUID?
     private var snapshotGeneration: UInt64?
 
-    func refresh(surfaceView: Ghostty.SurfaceView) async {
-        guard let surface = surfaceView.surfaceModel else { return }
+    @discardableResult
+    func refresh(surfaceView: Ghostty.SurfaceView) async -> Bool {
+        guard let surface = surfaceView.surfaceModel else { return false }
+        var changed = false
         if activeSurfaceID != surfaceView.id {
             activeSurfaceID = surfaceView.id
             snapshotGeneration = nil
-            groups = []
+            if !groups.isEmpty {
+                groups = []
+            }
+            changed = true
         }
-        if groups.isEmpty {
+        if groups.isEmpty, !isLoading {
             isLoading = true
         }
 
@@ -45,29 +49,36 @@ final class SidecarOutlineModel: ObservableObject {
             surface: surface,
             previousGeneration: snapshotGeneration
         )
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return false }
         let coreCommands: [SidecarCoreCommand]
         switch update {
         case .unchanged:
-            now = Date()
-            isLoading = false
-            return
+            if isLoading {
+                isLoading = false
+            }
+            return changed
         case .changed(let generation, let commands):
             snapshotGeneration = generation
             coreCommands = commands
+            changed = true
         case .failed:
-            isLoading = false
-            return
+            if isLoading {
+                isLoading = false
+            }
+            return changed
         }
 
         let metadata = SidecarCommandMetadataStore.shared.records(for: surfaceView)
-        groups = buildGroups(
+        let refreshedGroups = buildGroups(
             commands: coreCommands,
             metadata: metadata,
             fallbackDirectory: surfaceView.pwd
         )
-        now = Date()
-        isLoading = false
+        groups = refreshedGroups
+        if isLoading {
+            isLoading = false
+        }
+        return changed
     }
 
     func jump(to item: SidecarOutlineItem, surfaceView: Ghostty.SurfaceView) {

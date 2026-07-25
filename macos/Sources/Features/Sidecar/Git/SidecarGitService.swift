@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-struct SidecarGitSnapshot: Sendable {
+struct SidecarGitSnapshot: Equatable, Sendable {
     let repositoryRoot: URL
     let branch: String
     let upstream: String?
@@ -11,13 +11,49 @@ struct SidecarGitSnapshot: Sendable {
     let insertions: Int
     let deletions: Int
     let changes: [SidecarGitChange]
+    let stagedChanges: [SidecarGitChange]
+    let unstagedChanges: [SidecarGitChange]
+    let availablePaths: Set<String>
 
-    var stagedChanges: [SidecarGitChange] {
-        changes.filter { $0.isStaged && !$0.isConflict }
+    init(
+        repositoryRoot: URL,
+        branch: String,
+        upstream: String?,
+        ahead: Int,
+        behind: Int,
+        remoteURL: String?,
+        insertions: Int,
+        deletions: Int,
+        changes: [SidecarGitChange],
+        availablePaths: Set<String>
+    ) {
+        self.repositoryRoot = repositoryRoot
+        self.branch = branch
+        self.upstream = upstream
+        self.ahead = ahead
+        self.behind = behind
+        self.remoteURL = remoteURL
+        self.insertions = insertions
+        self.deletions = deletions
+        self.changes = changes
+        self.stagedChanges = changes.filter { $0.isStaged && !$0.isConflict }
+        self.unstagedChanges = changes.filter(\.isUnstaged)
+        self.availablePaths = availablePaths
     }
 
-    var unstagedChanges: [SidecarGitChange] {
-        changes.filter(\.isUnstaged)
+    func replacingRemoteURL(_ remoteURL: String?) -> Self {
+        .init(
+            repositoryRoot: repositoryRoot,
+            branch: branch,
+            upstream: upstream,
+            ahead: ahead,
+            behind: behind,
+            remoteURL: remoteURL,
+            insertions: insertions,
+            deletions: deletions,
+            changes: changes,
+            availablePaths: availablePaths
+        )
     }
 }
 
@@ -71,68 +107,175 @@ struct SidecarGitError: LocalizedError, Sendable {
 actor SidecarGitService {
     private static let diffByteLimit = 1_048_576
     private static let diffLineLimit = 20_000
+    private static let maximumRootCacheCount = 32
+    private static let maximumDiffCacheCount = 8
+    private static let missingRepositoryCacheDuration: TimeInterval = 10
+    private static let remoteCacheDuration: TimeInterval = 30
+    private static let diffCacheDuration: TimeInterval = 5
 
     private let runner = SidecarGitCommandRunner()
+    private var rootCache: [URL: SidecarGitRootCacheEntry] = [:]
+    private var repositoryCache: [URL: SidecarGitRepositoryCache] = [:]
 
     func snapshot(workingDirectory: URL) async throws -> SidecarGitSnapshot? {
-        try await runner.submit { command in
-            let rootResult = try command.run(
-                ["-C", workingDirectory.path, "rev-parse", "--show-toplevel"],
-                readOnly: true
-            )
-            guard rootResult.status == 0 else { return nil }
-
-            let rootPath = rootResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rootPath.isEmpty else { return nil }
-            let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-
-            let statusResult = try command.run(
-                [
-                    "-C", root.path,
-                    "status",
-                    "--porcelain=v2",
-                    "--branch",
-                    "--show-stash",
-                    "--untracked-files=normal",
-                    "-z",
-                ],
-                readOnly: true
-            )
-            try Self.requireSuccess(statusResult)
-
-            let parsed = SidecarGitParser.status(statusResult.data)
-            let remoteResult = try command.run(
-                ["-C", root.path, "remote", "get-url", "origin"],
-                readOnly: true
-            )
-            let remoteURL = remoteResult.status == 0
-                ? remoteResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                : nil
-
-            let headResult = try command.run(
-                ["-C", root.path, "rev-parse", "--verify", "HEAD"],
-                readOnly: true
-            )
-            let diffArguments = headResult.status == 0
-                ? ["-C", root.path, "diff", "--numstat", "HEAD"]
-                : ["-C", root.path, "diff", "--cached", "--numstat"]
-            let diffResult = try command.run(diffArguments, readOnly: true)
-            let diff = diffResult.status == 0
-                ? SidecarGitParser.numstat(diffResult.output)
-                : (0, 0)
-
-            return SidecarGitSnapshot(
-                repositoryRoot: root,
-                branch: parsed.branch,
-                upstream: parsed.upstream,
-                ahead: parsed.ahead,
-                behind: parsed.behind,
-                remoteURL: remoteURL?.isEmpty == false ? remoteURL : nil,
-                insertions: diff.0,
-                deletions: diff.1,
-                changes: parsed.changes
-            )
+        let workingDirectory = workingDirectory.standardizedFileURL
+        let now = Date()
+        let cachedRoot = rootCache[workingDirectory]
+        if let cachedRoot,
+           cachedRoot.root == nil,
+           now.timeIntervalSince(cachedRoot.checkedAt)
+            < Self.missingRepositoryCacheDuration {
+            return nil
         }
+
+        let cachedRepositoryRoot = cachedRoot?.root
+        let cachedRepository = cachedRepositoryRoot.flatMap { repositoryCache[$0] }
+        let transaction: SidecarGitSnapshotTransaction?
+        do {
+            transaction = try await runner.submit { command -> SidecarGitSnapshotTransaction? in
+                let root: URL
+                if let cachedRoot = cachedRepositoryRoot {
+                    root = cachedRoot
+                } else {
+                    let rootResult = try command.run(
+                        ["-C", workingDirectory.path, "rev-parse", "--show-toplevel"],
+                        readOnly: true
+                    )
+                    guard rootResult.status == 0 else { return nil }
+
+                    let rootPath = rootResult.output.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    )
+                    guard !rootPath.isEmpty else { return nil }
+                    root = URL(fileURLWithPath: rootPath, isDirectory: true)
+                        .standardizedFileURL
+                }
+
+                let matchingCache = cachedRepository?.root == root
+                    ? cachedRepository
+                    : nil
+                let statusResult = try command.run(
+                    [
+                        "-C", root.path,
+                        "status",
+                        "--porcelain=v2",
+                        "--branch",
+                        "--show-stash",
+                        "--untracked-files=normal",
+                        "-z",
+                    ],
+                    readOnly: true
+                )
+                try Self.requireSuccess(statusResult)
+                let parsed = SidecarGitParser.status(statusResult.data)
+                let fingerprint = Self.statusFingerprint(
+                    root: root,
+                    statusData: statusResult.data,
+                    changes: parsed.changes
+                )
+
+                let shouldRefreshRemote = matchingCache.map {
+                    now.timeIntervalSince($0.remoteCheckedAt)
+                        >= Self.remoteCacheDuration
+                } ?? true
+                let remoteURL: String?
+                let remoteCheckedAt: Date
+                if shouldRefreshRemote {
+                    let remoteResult = try command.run(
+                        ["-C", root.path, "remote", "get-url", "origin"],
+                        readOnly: true
+                    )
+                    let value = remoteResult.status == 0
+                        ? remoteResult.output.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        )
+                        : nil
+                    remoteURL = value?.isEmpty == false ? value : nil
+                    remoteCheckedAt = now
+                } else {
+                    remoteURL = matchingCache?.snapshot.remoteURL
+                    remoteCheckedAt = matchingCache?.remoteCheckedAt ?? now
+                }
+
+                if let matchingCache,
+                   matchingCache.fingerprint == fingerprint {
+                    return .init(
+                        root: root,
+                        fingerprint: fingerprint,
+                        snapshot: matchingCache.snapshot.replacingRemoteURL(remoteURL),
+                        remoteCheckedAt: remoteCheckedAt
+                    )
+                }
+
+                let headResult = try command.run(
+                    ["-C", root.path, "rev-parse", "--verify", "HEAD"],
+                    readOnly: true
+                )
+                let diffArguments = headResult.status == 0
+                    ? ["-C", root.path, "diff", "--numstat", "HEAD"]
+                    : ["-C", root.path, "diff", "--cached", "--numstat"]
+                let diffResult = try command.run(diffArguments, readOnly: true)
+                let diff = diffResult.status == 0
+                    ? SidecarGitParser.numstat(diffResult.output)
+                    : (0, 0)
+                let availablePaths = Set(parsed.changes.lazy.compactMap { change in
+                    let path = root.appendingPathComponent(change.path).path
+                    return FileManager.default.fileExists(atPath: path)
+                        ? change.path
+                        : nil
+                })
+
+                let snapshot = SidecarGitSnapshot(
+                    repositoryRoot: root,
+                    branch: parsed.branch,
+                    upstream: parsed.upstream,
+                    ahead: parsed.ahead,
+                    behind: parsed.behind,
+                    remoteURL: remoteURL,
+                    insertions: diff.0,
+                    deletions: diff.1,
+                    changes: parsed.changes,
+                    availablePaths: availablePaths
+                )
+                return .init(
+                    root: root,
+                    fingerprint: fingerprint,
+                    snapshot: snapshot,
+                    remoteCheckedAt: remoteCheckedAt
+                )
+            }
+        } catch {
+            rootCache[workingDirectory] = nil
+            throw error
+        }
+
+        guard let transaction else {
+            rootCache[workingDirectory] = .init(root: nil, checkedAt: now)
+            trimRootCache()
+            return nil
+        }
+
+        rootCache[workingDirectory] = .init(
+            root: transaction.root,
+            checkedAt: now
+        )
+        trimRootCache()
+
+        var cache = repositoryCache[transaction.root]
+            ?? .init(
+                root: transaction.root,
+                fingerprint: transaction.fingerprint,
+                snapshot: transaction.snapshot,
+                remoteCheckedAt: transaction.remoteCheckedAt
+            )
+        if cache.fingerprint != transaction.fingerprint {
+            cache.diffCache.removeAll(keepingCapacity: true)
+        }
+        cache.fingerprint = transaction.fingerprint
+        cache.snapshot = transaction.snapshot
+        cache.remoteCheckedAt = transaction.remoteCheckedAt
+        repositoryCache[transaction.root] = cache
+        return transaction.snapshot
     }
 
     func perform(_ operation: SidecarGitOperation, repository: URL) async throws {
@@ -202,6 +345,7 @@ actor SidecarGitService {
                 readOnly: false
             ))
         }
+        repositoryCache[repository.standardizedFileURL] = nil
     }
 
     func diff(
@@ -209,7 +353,31 @@ actor SidecarGitService {
         repository: URL,
         isStaged: Bool
     ) async throws -> String {
-        try await runner.submit { command in
+        let repository = repository.standardizedFileURL
+        let key = SidecarGitDiffCacheKey(
+            change: change,
+            isStaged: isStaged,
+            contentFingerprint: Self.diffFingerprint(
+                change: change,
+                repository: repository,
+                isStaged: isStaged
+            )
+        )
+        let now = Date()
+        if var cache = repositoryCache[repository],
+           let entry = cache.diffCache[key],
+           now.timeIntervalSince(entry.createdAt) < Self.diffCacheDuration {
+            cache.diffCache[key] = .init(
+                value: entry.value,
+                createdAt: entry.createdAt,
+                lastAccessedAt: now
+            )
+            repositoryCache[repository] = cache
+            return entry.value
+        }
+
+        let fingerprint = repositoryCache[repository]?.fingerprint
+        let output = try await runner.submit { command in
             let arguments: [String]
             let successfulStatuses: Set<Int32>
 
@@ -257,6 +425,98 @@ actor SidecarGitService {
             let output = Self.diffPreview(result)
             return output.isEmpty ? "No diff available." : output
         }
+
+        if var cache = repositoryCache[repository],
+           cache.fingerprint == fingerprint {
+            cache.diffCache[key] = .init(
+                value: output,
+                createdAt: now,
+                lastAccessedAt: now
+            )
+            if cache.diffCache.count > Self.maximumDiffCacheCount,
+               let oldestKey = cache.diffCache.min(by: {
+                   $0.value.lastAccessedAt < $1.value.lastAccessedAt
+               })?.key {
+                cache.diffCache[oldestKey] = nil
+            }
+            repositoryCache[repository] = cache
+        }
+        return output
+    }
+
+    private func trimRootCache() {
+        while rootCache.count > Self.maximumRootCacheCount,
+              let oldest = rootCache.min(by: {
+                  $0.value.checkedAt < $1.value.checkedAt
+              })?.key {
+            rootCache[oldest] = nil
+        }
+    }
+
+    private nonisolated static func statusFingerprint(
+        root: URL,
+        statusData: Data,
+        changes: [SidecarGitChange]
+    ) -> SidecarGitStatusFingerprint {
+        let paths = Set(changes.flatMap(\.operationPaths))
+        return .init(
+            statusData: statusData,
+            files: paths
+                .map { fileFingerprint(root.appendingPathComponent($0)) }
+                .sorted { $0.path < $1.path },
+            index: fileFingerprint(gitDirectory(root).appendingPathComponent("index"))
+        )
+    }
+
+    private nonisolated static func diffFingerprint(
+        change: SidecarGitChange,
+        repository: URL,
+        isStaged: Bool
+    ) -> [SidecarGitFileFingerprint] {
+        if isStaged {
+            return [
+                fileFingerprint(
+                    gitDirectory(repository).appendingPathComponent("index")
+                ),
+            ]
+        }
+        return change.operationPaths
+            .map { fileFingerprint(repository.appendingPathComponent($0)) }
+            .sorted { $0.path < $1.path }
+    }
+
+    private nonisolated static func gitDirectory(_ repository: URL) -> URL {
+        let dotGit = repository.appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(
+            atPath: dotGit.path,
+            isDirectory: &isDirectory
+        ), isDirectory.boolValue {
+            return dotGit
+        }
+
+        guard let contents = try? String(contentsOf: dotGit, encoding: .utf8),
+              contents.hasPrefix("gitdir:") else {
+            return dotGit
+        }
+        let path = contents
+            .dropFirst("gitdir:".count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = URL(fileURLWithPath: path, relativeTo: repository)
+        return url.standardizedFileURL
+    }
+
+    private nonisolated static func fileFingerprint(
+        _ url: URL
+    ) -> SidecarGitFileFingerprint {
+        let attributes = try? FileManager.default.attributesOfItem(
+            atPath: url.path
+        )
+        return .init(
+            path: url.standardizedFileURL.path,
+            size: attributes?[.size] as? UInt64,
+            modifiedAt: attributes?[.modificationDate] as? Date
+        )
     }
 
     private nonisolated static func diffPreview(_ result: GitResult) -> String {
@@ -296,6 +556,50 @@ actor SidecarGitService {
             )
         }
     }
+}
+
+private struct SidecarGitRootCacheEntry: Sendable {
+    let root: URL?
+    let checkedAt: Date
+}
+
+private struct SidecarGitRepositoryCache: Sendable {
+    let root: URL
+    var fingerprint: SidecarGitStatusFingerprint
+    var snapshot: SidecarGitSnapshot
+    var remoteCheckedAt: Date
+    var diffCache: [SidecarGitDiffCacheKey: SidecarGitDiffCacheEntry] = [:]
+}
+
+private struct SidecarGitSnapshotTransaction: Sendable {
+    let root: URL
+    let fingerprint: SidecarGitStatusFingerprint
+    let snapshot: SidecarGitSnapshot
+    let remoteCheckedAt: Date
+}
+
+private struct SidecarGitDiffCacheKey: Hashable, Sendable {
+    let change: SidecarGitChange
+    let isStaged: Bool
+    let contentFingerprint: [SidecarGitFileFingerprint]
+}
+
+private struct SidecarGitDiffCacheEntry: Sendable {
+    let value: String
+    let createdAt: Date
+    let lastAccessedAt: Date
+}
+
+private struct SidecarGitStatusFingerprint: Equatable, Sendable {
+    let statusData: Data
+    let files: [SidecarGitFileFingerprint]
+    let index: SidecarGitFileFingerprint
+}
+
+private struct SidecarGitFileFingerprint: Hashable, Sendable {
+    let path: String
+    let size: UInt64?
+    let modifiedAt: Date?
 }
 
 /// Executes complete Git transactions on one utility queue.

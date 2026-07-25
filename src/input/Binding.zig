@@ -673,6 +673,14 @@ pub const Action = union(enum) {
     /// Valid arguments: `toggle`, `show`, `hide`.
     inspector: InspectorMode,
 
+    /// Control the visibility and selected panel of the macOS Sidecar.
+    ///
+    /// Valid arguments: `toggle`, `show`, `hide`, `info`, `outline`,
+    /// `git`, `files`.
+    ///
+    /// Selecting a panel also shows the Sidecar.
+    sidecar: SidecarMode,
+
     /// Show the GTK inspector.
     ///
     /// Has no effect on macOS.
@@ -1178,6 +1186,16 @@ pub const Action = union(enum) {
         hide,
     };
 
+    pub const SidecarMode = enum {
+        toggle,
+        show,
+        hide,
+        info,
+        outline,
+        git,
+        files,
+    };
+
     pub const CloseTabMode = enum {
         this,
         other,
@@ -1427,6 +1445,7 @@ pub const Action = union(enum) {
             .resize_split,
             .equalize_splits,
             .inspector,
+            .sidecar,
             => .surface,
         };
     }

@@ -13,7 +13,7 @@ struct TerminalCommandPaletteView: View {
     @ObservedObject var ghosttyConfig: Ghostty.Config
 
     /// Window-scoped Sidecar state for native macOS commands.
-    @ObservedObject var sidecarState: SidecarState
+    let sidecarState: SidecarState
 
     /// The update view model for showing update commands.
     var updateViewModel: UpdateViewModel?
@@ -83,10 +83,13 @@ struct TerminalCommandPaletteView: View {
         return options
     }
 
-    /// Native Sidecar commands don't have Ghostty core binding actions, so append
-    /// them directly while sharing the same state as the titlebar and View menu.
+    /// Sidecar commands are always available, independent of customized command
+    /// palette entries, while their shortcuts come from the Ghostty keybind config.
     private var sidecarOptions: [CommandOption] {
-        SidecarCommandOptions.make(state: sidecarState)
+        SidecarCommandOptions.make(
+            state: sidecarState,
+            config: ghosttyConfig
+        )
     }
 
     /// Commands for installing or canceling available updates.
@@ -188,13 +191,17 @@ struct TerminalCommandPaletteView: View {
 
 @MainActor
 enum SidecarCommandOptions {
-    static func make(state: SidecarState) -> [CommandOption] {
+    static func make(
+        state: SidecarState,
+        config: Ghostty.Config
+    ) -> [CommandOption] {
         var options = [
             CommandOption(
                 title: "Toggle Sidecar",
                 description: "Show or hide the terminal Sidecar.",
-                symbols: SidecarShortcut.keyboardShortcut.keyList,
-                leadingIcon: "sidebar.right"
+                symbols: config.keyboardShortcut(
+                    for: SidecarBindingAction.toggle.configValue
+                )?.keyList
             ) {
                 state.toggle()
             },
@@ -204,7 +211,9 @@ enum SidecarCommandOptions {
             CommandOption(
                 title: "Open Sidecar: \(panel.title)",
                 description: "Open the terminal Sidecar on the \(panel.title) panel.",
-                leadingIcon: panel.systemImage
+                symbols: config.keyboardShortcut(
+                    for: panel.bindingAction.configValue
+                )?.keyList
             ) {
                 state.show(panel)
             }
@@ -213,7 +222,9 @@ enum SidecarCommandOptions {
         options.append(CommandOption(
             title: "Close Sidecar",
             description: "Hide the terminal Sidecar.",
-            leadingIcon: "sidebar.right"
+            symbols: config.keyboardShortcut(
+                for: SidecarBindingAction.hide.configValue
+            )?.keyList
         ) {
             state.hide()
         })

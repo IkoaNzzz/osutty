@@ -192,6 +192,7 @@
 				Features/Sidecar/SidecarComponents.swift,
 				Features/Sidecar/SidecarContainer.swift,
 				Features/Sidecar/SidecarState.swift,
+				Features/Sidecar/SidecarSurfaceContext.swift,
 				Features/Sidecar/SidecarView.swift,
 				Features/Settings/ConfigurationErrors.xib,
 				Features/Settings/ConfigurationErrorsController.swift,

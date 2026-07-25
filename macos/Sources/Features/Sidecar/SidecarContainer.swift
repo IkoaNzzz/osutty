@@ -226,6 +226,7 @@ extension View {
     ) -> some View {
         modifier(SidecarHostModifier(
             state: state,
+            presentation: state.presentation,
             surfaceView: surfaceView,
             ghostty: ghostty
         ))
@@ -233,7 +234,8 @@ extension View {
 }
 
 private struct SidecarHostModifier: ViewModifier {
-    @ObservedObject var state: SidecarState
+    let state: SidecarState
+    @ObservedObject var presentation: SidecarPresentationState
     let surfaceView: Ghostty.SurfaceView?
     let ghostty: Ghostty.App
 
@@ -243,21 +245,22 @@ private struct SidecarHostModifier: ViewModifier {
             SidecarObservedSurfaceHost(
                 content: content,
                 state: state,
+                presentation: presentation,
                 surfaceView: surfaceView,
                 ghostty: ghostty
             )
         } else {
             SidecarContainer(
-                isVisible: $state.isVisible,
-                sidecarWidth: $state.width,
+                isVisible: $presentation.isVisible,
+                sidecarWidth: $presentation.width,
                 reservedAreaColor: ghostty.config.backgroundColor,
                 reservedAreaOpacity: ghostty.config.backgroundOpacity
             ) {
                 content
             } sidecar: {
                 SidecarView(
-                    state: state,
-                    surfaceView: nil
+                    selection: state.selection,
+                    surface: nil
                 )
                 .environmentObject(ghostty)
             }
@@ -267,25 +270,47 @@ private struct SidecarHostModifier: ViewModifier {
 
 private struct SidecarObservedSurfaceHost<Content: View>: View {
     let content: Content
-    @ObservedObject var state: SidecarState
-    @ObservedObject var surfaceView: Ghostty.SurfaceView
+    let state: SidecarState
+    @ObservedObject var presentation: SidecarPresentationState
+    @StateObject private var surface: SidecarSurfaceContext
+    let surfaceView: Ghostty.SurfaceView
     let ghostty: Ghostty.App
+
+    init(
+        content: Content,
+        state: SidecarState,
+        presentation: SidecarPresentationState,
+        surfaceView: Ghostty.SurfaceView,
+        ghostty: Ghostty.App
+    ) {
+        self.content = content
+        self.state = state
+        self.presentation = presentation
+        self.surfaceView = surfaceView
+        _surface = StateObject(
+            wrappedValue: SidecarSurfaceContext(surfaceView: surfaceView)
+        )
+        self.ghostty = ghostty
+    }
 
     var body: some View {
         SidecarContainer(
-            isVisible: $state.isVisible,
-            sidecarWidth: $state.width,
-            reservedAreaColor: surfaceView.backgroundColor
+            isVisible: $presentation.isVisible,
+            sidecarWidth: $presentation.width,
+            reservedAreaColor: surface.backgroundColor
                 ?? ghostty.config.backgroundColor,
-            reservedAreaOpacity: surfaceView.derivedConfig.backgroundOpacity
+            reservedAreaOpacity: surface.backgroundOpacity
         ) {
             content
         } sidecar: {
             SidecarView(
-                state: state,
-                surfaceView: surfaceView
+                selection: state.selection,
+                surface: surface
             )
             .environmentObject(ghostty)
+        }
+        .task(id: surfaceView.id) {
+            surface.update(surfaceView: surfaceView)
         }
     }
 }

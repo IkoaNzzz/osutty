@@ -161,7 +161,8 @@ class TerminalWindow: NSWindow {
                 sidecarAccessory.layoutAttribute = .right
                 sidecarAccessory.view = NonDraggableHostingView(rootView: SidecarToggleAccessoryView(
                     viewModel: viewModel,
-                    state: sidecarState
+                    presentation: sidecarState.presentation,
+                    ghostty: appDelegate.ghostty
                 ))
                 addTitlebarAccessoryViewController(sidecarAccessory)
                 sidecarAccessory.view.translatesAutoresizingMaskIntoConstraints = false
@@ -692,11 +693,15 @@ extension TerminalWindow {
 
     struct SidecarToggleAccessoryView: View {
         @ObservedObject var viewModel: ViewModel
-        @ObservedObject var state: SidecarState
+        @ObservedObject var presentation: SidecarPresentationState
+        @ObservedObject var ghostty: Ghostty.App
 
         var body: some View {
             VStack {
-                SidecarToggleButton(state: state)
+                SidecarToggleButton(
+                    presentation: presentation,
+                    ghostty: ghostty
+                )
                     .opacity(viewModel.isMainWindow ? 1 : 0.65)
                 Spacer()
             }

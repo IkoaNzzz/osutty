@@ -5466,6 +5466,17 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             },
         ),
 
+        .sidecar => |mode| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .sidecar,
+            switch (mode) {
+                inline else => |tag| @field(
+                    apprt.action.Sidecar,
+                    @tagName(tag),
+                ),
+            },
+        ),
+
         .close_surface => self.close(),
 
         .close_window => return try self.rt_app.performAction(

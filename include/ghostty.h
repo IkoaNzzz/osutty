@@ -645,6 +645,17 @@ typedef enum {
   GHOSTTY_INSPECTOR_HIDE,
 } ghostty_action_inspector_e;
 
+// apprt.action.Sidecar
+typedef enum {
+  GHOSTTY_SIDECAR_TOGGLE,
+  GHOSTTY_SIDECAR_SHOW,
+  GHOSTTY_SIDECAR_HIDE,
+  GHOSTTY_SIDECAR_INFO,
+  GHOSTTY_SIDECAR_OUTLINE,
+  GHOSTTY_SIDECAR_GIT,
+  GHOSTTY_SIDECAR_FILES,
+} ghostty_action_sidecar_e;
+
 // apprt.action.QuitTimer
 typedef enum {
   GHOSTTY_QUIT_TIMER_START,
@@ -949,6 +960,7 @@ typedef enum {
   GHOSTTY_ACTION_SEARCH_SELECTED,
   GHOSTTY_ACTION_READONLY,
   GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
+  GHOSTTY_ACTION_SIDECAR,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -990,6 +1002,7 @@ typedef union {
   ghostty_action_search_total_s search_total;
   ghostty_action_search_selected_s search_selected;
   ghostty_action_readonly_e readonly;
+  ghostty_action_sidecar_e sidecar;
 } ghostty_action_u;
 
 typedef struct {

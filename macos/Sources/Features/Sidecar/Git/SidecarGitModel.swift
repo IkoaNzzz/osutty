@@ -41,23 +41,37 @@ final class SidecarGitModel: ObservableObject {
         operationMessage = nil
     }
 
-    func refresh() async {
-        guard let workingDirectory, !isOperating else { return }
+    @discardableResult
+    func refresh() async -> Bool {
+        guard let workingDirectory, !isOperating else { return false }
         if !hasCompletedRefresh {
             isLoading = true
         }
 
+        let changed: Bool
         do {
             let value = try await service.snapshot(workingDirectory: workingDirectory)
-            guard !Task.isCancelled else { return }
-            snapshot = value
-            errorMessage = nil
+            guard !Task.isCancelled else { return false }
+            changed = snapshot != value
+            if changed {
+                snapshot = value
+            }
+            if errorMessage != nil {
+                errorMessage = nil
+            }
         } catch {
-            guard !Task.isCancelled else { return }
-            errorMessage = error.localizedDescription
+            guard !Task.isCancelled else { return false }
+            let message = error.localizedDescription
+            changed = errorMessage != message
+            if changed {
+                errorMessage = message
+            }
         }
         hasCompletedRefresh = true
-        isLoading = false
+        if isLoading {
+            isLoading = false
+        }
+        return changed
     }
 
     func perform(_ operation: SidecarGitOperation, label: String) {

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SidecarOutlineView: View {
     @ObservedObject var model: SidecarOutlineModel
-    @ObservedObject var surfaceView: Ghostty.SurfaceView
+    @ObservedObject var surface: SidecarSurfaceContext
 
     var body: some View {
         Group {
@@ -35,11 +35,22 @@ struct SidecarOutlineView: View {
                 }
             }
         }
-        .task(id: surfaceView.id) {
+        .task(id: surface.id) {
+            var unchangedRefreshes = 0
             while !Task.isCancelled {
-                await model.refresh(surfaceView: surfaceView)
+                let changed = await model.refresh(
+                    surfaceView: surface.surfaceView
+                )
+                unchangedRefreshes = changed
+                    ? 0
+                    : min(unchangedRefreshes + 1, 2)
+                let delay = switch unchangedRefreshes {
+                case 0: Duration.seconds(2)
+                case 1: Duration.seconds(5)
+                default: Duration.seconds(10)
+                }
                 do {
-                    try await Task.sleep(for: .seconds(2))
+                    try await Task.sleep(for: delay)
                 } catch {
                     return
                 }
@@ -48,14 +59,13 @@ struct SidecarOutlineView: View {
     }
 
     private func commandGroup(_ group: SidecarOutlineGroup) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        LazyVStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Text(abbreviate(group.workingDirectory) ?? "Unknown Directory")
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let latestDate = group.latestDate {
-                    Text(latestDate.relativeDescription(to: model.now))
-                        .lineLimit(1)
+                    SidecarRelativeDateText(date: latestDate)
                 }
             }
             .font(.system(size: 10, weight: .medium))
@@ -63,7 +73,7 @@ struct SidecarOutlineView: View {
 
             ForEach(group.items) { item in
                 Button {
-                    model.jump(to: item, surfaceView: surfaceView)
+                    model.jump(to: item, surfaceView: surface.surfaceView)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(item.command)
@@ -96,6 +106,17 @@ struct SidecarOutlineView: View {
             return "~" + path.dropFirst(home.count) + "/"
         }
         return path.hasSuffix("/") ? path : path + "/"
+    }
+}
+
+private struct SidecarRelativeDateText: View {
+    let date: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            Text(date.relativeDescription(to: timeline.date))
+                .lineLimit(1)
+        }
     }
 }
 

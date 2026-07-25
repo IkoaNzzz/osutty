@@ -1,14 +1,14 @@
 import Darwin
 import Foundation
 
-struct SidecarProcessSnapshot: Sendable {
+struct SidecarProcessSnapshot: Equatable, Sendable {
     var processes: [SidecarProcessInfo]
     var listeningPorts: [SidecarListeningPort]
 
     static let empty = SidecarProcessSnapshot(processes: [], listeningPorts: [])
 }
 
-struct SidecarProcessInfo: Identifiable, Sendable {
+struct SidecarProcessInfo: Hashable, Identifiable, Sendable {
     let pid: Int32
     let parentPID: Int32
     let name: String
@@ -33,25 +33,68 @@ struct SidecarListeningPort: Identifiable, Hashable, Sendable {
 actor SidecarProcessService {
     static let shared = SidecarProcessService()
 
+    private static let processCacheDuration: TimeInterval = 2
+    private static let portCacheDuration: TimeInterval = 4
+
+    private var processCache: SidecarProcessTreeCache?
+    private var portCache: [SidecarProcessIdentity: SidecarPortCacheEntry] = [:]
+
     func snapshot(foregroundPID: Int?) -> SidecarProcessSnapshot {
         guard let foregroundPID, let rootPID = Int32(exactly: foregroundPID) else {
             return .empty
         }
 
-        var processes = processTree(rootPID: rootPID, limit: 64)
-        if let root = processes.first,
-           !isShell(root.name),
-           !processes.contains(where: { $0.pid == root.parentPID }),
-           let parent = processInfo(pid: root.parentPID),
-           isShell(parent.name) {
-            processes.append(parent)
+        guard let root = processInfo(pid: rootPID) else { return .empty }
+        let now = Date()
+        let rootIdentity = SidecarProcessIdentity(root)
+        let rootChildren = childPIDs(of: root.pid)
+        let processes: [SidecarProcessInfo]
+        if let cached = processCache,
+           cached.root == rootIdentity,
+           cached.rootChildren == rootChildren,
+           now.timeIntervalSince(cached.loadedAt)
+            < Self.processCacheDuration {
+            processes = cached.processes
+        } else {
+            var refreshed = processTree(
+                root: root,
+                rootChildren: rootChildren,
+                limit: 64
+            )
+            if !isShell(root.name),
+               !refreshed.contains(where: { $0.pid == root.parentPID }),
+               let parent = processInfo(pid: root.parentPID),
+               isShell(parent.name) {
+                refreshed.append(parent)
+            }
+            processes = refreshed
+            processCache = .init(
+                root: rootIdentity,
+                rootChildren: rootChildren,
+                processes: refreshed,
+                loadedAt: now
+            )
         }
 
         var ports = Set<SidecarListeningPort>()
         for process in processes {
             guard !Task.isCancelled else { return .empty }
-            ports.formUnion(listeningPorts(pid: process.pid))
+            let identity = SidecarProcessIdentity(process)
+            if let cached = portCache[identity],
+               now.timeIntervalSince(cached.loadedAt)
+                < Self.portCacheDuration {
+                ports.formUnion(cached.ports)
+            } else {
+                let refreshed = listeningPorts(pid: process.pid)
+                portCache[identity] = .init(
+                    ports: refreshed,
+                    loadedAt: now
+                )
+                ports.formUnion(refreshed)
+            }
         }
+        let activeIdentities = Set(processes.map(SidecarProcessIdentity.init))
+        portCache = portCache.filter { activeIdentities.contains($0.key) }
 
         return SidecarProcessSnapshot(
             processes: processes,
@@ -63,10 +106,14 @@ actor SidecarProcessService {
         )
     }
 
-    private func processTree(rootPID: Int32, limit: Int) -> [SidecarProcessInfo] {
-        var pending = [rootPID]
-        var seen = Set<Int32>()
-        var result: [SidecarProcessInfo] = []
+    private func processTree(
+        root: SidecarProcessInfo,
+        rootChildren: [Int32],
+        limit: Int
+    ) -> [SidecarProcessInfo] {
+        var pending = rootChildren
+        var seen: Set<Int32> = [root.pid]
+        var result = [root]
 
         while let pid = pending.first, result.count < limit {
             guard !Task.isCancelled else { return [] }
@@ -214,4 +261,26 @@ actor SidecarProcessService {
 
         return "*"
     }
+}
+
+private struct SidecarProcessIdentity: Hashable {
+    let pid: Int32
+    let startedAt: Date
+
+    init(_ process: SidecarProcessInfo) {
+        self.pid = process.pid
+        self.startedAt = process.startedAt
+    }
+}
+
+private struct SidecarProcessTreeCache {
+    let root: SidecarProcessIdentity
+    let rootChildren: [Int32]
+    let processes: [SidecarProcessInfo]
+    let loadedAt: Date
+}
+
+private struct SidecarPortCacheEntry {
+    let ports: Set<SidecarListeningPort>
+    let loadedAt: Date
 }

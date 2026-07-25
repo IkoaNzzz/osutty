@@ -245,5 +245,29 @@ struct ConfigTests {
         #expect(newWindow == .init("n", modifiers: [.command]))
         let gotoToNextSplit = try #require(config.keyboardShortcut(for: "goto_split:next"))
         #expect(gotoToNextSplit == .init("]", modifiers: [.command]))
+        let sidecar = try #require(config.keyboardShortcut(for: "sidecar:toggle"))
+        #expect(sidecar == .init("s", modifiers: [.control, .command]))
+    }
+
+    @Test
+    func sidecarShortcutsCanBeConfigured() async throws {
+        let config = try TemporaryConfig("""
+        keybind=cmd+shift+s=sidecar:toggle
+        keybind=cmd+shift+i=sidecar:info
+        keybind=cmd+shift+w=sidecar:hide
+        """)
+
+        #expect(
+            config.keyboardShortcut(for: "sidecar:toggle")
+                == .init("s", modifiers: [.shift, .command])
+        )
+        #expect(
+            config.keyboardShortcut(for: "sidecar:info")
+                == .init("i", modifiers: [.shift, .command])
+        )
+        #expect(
+            config.keyboardShortcut(for: "sidecar:hide")
+                == .init("w", modifiers: [.shift, .command])
+        )
     }
 }

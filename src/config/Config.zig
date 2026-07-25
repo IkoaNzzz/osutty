@@ -6908,6 +6908,16 @@ pub const Keybinds = struct {
 
         // Mac-specific keyboard bindings.
         if (comptime builtin.target.os.tag.isDarwin()) {
+            // Toggle the Sidecar.
+            try self.set.put(
+                alloc,
+                .{
+                    .key = .{ .unicode = 's' },
+                    .mods = .{ .ctrl = true, .super = true },
+                },
+                .{ .sidecar = .toggle },
+            );
+
             try self.set.put(
                 alloc,
                 .{ .key = .{ .unicode = 'q' }, .mods = .{ .super = true } },

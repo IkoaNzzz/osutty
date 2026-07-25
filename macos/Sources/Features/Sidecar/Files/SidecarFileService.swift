@@ -47,7 +47,7 @@ actor SidecarFileService {
             guard showsHiddenFiles || !hidden else { return nil }
 
             return SidecarFileEntry(
-                url: url,
+                url: url.standardizedFileURL,
                 isDirectory: values?.isDirectory == true,
                 isSymbolicLink: values?.isSymbolicLink == true
             )
@@ -102,7 +102,7 @@ actor SidecarFileService {
             }
 
             result.append(SidecarFileEntry(
-                url: url,
+                url: url.standardizedFileURL,
                 isDirectory: values?.isDirectory == true,
                 isSymbolicLink: values?.isSymbolicLink == true
             ))

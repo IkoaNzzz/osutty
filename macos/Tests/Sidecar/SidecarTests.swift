@@ -149,6 +149,13 @@ struct SidecarGitServiceTests {
         try Data("changed\n".utf8).write(to: file)
         snapshot = try #require(try await service.snapshot(workingDirectory: root))
         #expect(snapshot.unstagedChanges.map(\.path) == ["README.md"])
+        #expect(snapshot.insertions == 1)
+
+        // The porcelain status remains `.M`, so cached snapshots must also
+        // consider file metadata before reusing diff statistics.
+        try Data("changed\nsecond\n".utf8).write(to: file)
+        snapshot = try #require(try await service.snapshot(workingDirectory: root))
+        #expect(snapshot.insertions == 2)
 
         try await service.perform(.stage(paths: ["README.md"]), repository: root)
         snapshot = try #require(try await service.snapshot(workingDirectory: root))
@@ -166,6 +173,14 @@ struct SidecarGitServiceTests {
         )
         #expect(unstagedDiff.contains("-initial"))
         #expect(unstagedDiff.contains("+changed"))
+
+        try Data("changed again\n".utf8).write(to: file)
+        let refreshedDiff = try await service.diff(
+            for: unstagedChange,
+            repository: root,
+            isStaged: false
+        )
+        #expect(refreshedDiff.contains("+changed again"))
 
         let untrackedFile = root.appending(path: "notes.txt")
         try Data("untracked\n".utf8).write(to: untrackedFile)
@@ -479,6 +494,65 @@ struct SidecarFileServiceTests {
     }
 }
 
+@MainActor
+struct SidecarFilesModelTests {
+    @Test func expandsAndCollapsesOnlyTheSelectedDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let folder = root.appending(path: "Folder", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(FileManager.default.createFile(
+            atPath: root.appending(path: "sibling.txt").path,
+            contents: Data()
+        ))
+        #expect(FileManager.default.createFile(
+            atPath: folder.appending(path: "child.txt").path,
+            contents: Data()
+        ))
+
+        let model = SidecarFilesModel()
+        model.setRoot(root)
+        #expect(await eventually {
+            model.rows.map(\.entry.name) == ["Folder", "sibling.txt"]
+        })
+
+        let folderEntry = try #require(model.rows.first?.entry)
+        model.toggle(folderEntry)
+        #expect(await eventually {
+            model.rows.map(\.entry.name) == [
+                "Folder",
+                "child.txt",
+                "sibling.txt",
+            ]
+        })
+
+        model.toggle(folderEntry)
+        #expect(model.rows.map(\.entry.name) == ["Folder", "sibling.txt"])
+
+        // The second expansion is synchronous because its children are cached.
+        model.toggle(folderEntry)
+        #expect(model.rows.map(\.entry.name) == [
+            "Folder",
+            "child.txt",
+            "sibling.txt",
+        ])
+    }
+
+    private func eventually(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<100 {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return condition()
+    }
+}
+
 struct SidecarProcessServiceTests {
     @Test func readsTheCurrentProcessWithoutScanningTheSystem() async {
         let snapshot = await SidecarProcessService.shared.snapshot(
@@ -562,7 +636,15 @@ struct SidecarStateTests {
 
     @Test @MainActor func commandPaletteOptionsOpenCloseAndToggle() throws {
         let state = SidecarState(isVisible: false)
-        let options = SidecarCommandOptions.make(state: state)
+        let config = try TemporaryConfig("""
+        keybind=cmd+shift+s=sidecar:toggle
+        keybind=cmd+shift+i=sidecar:info
+        keybind=cmd+shift+w=sidecar:hide
+        """)
+        let options = SidecarCommandOptions.make(
+            state: state,
+            config: config
+        )
 
         #expect(options.map(\.title) == [
             "Toggle Sidecar",
@@ -572,21 +654,30 @@ struct SidecarStateTests {
             "Open Sidecar: Files",
             "Close Sidecar",
         ])
+        #expect(options.allSatisfy { $0.leadingIcon == nil })
 
-        try #require(options.first { $0.title == "Open Sidecar: Info" }).action()
+        let info = try #require(options.first {
+            $0.title == "Open Sidecar: Info"
+        })
+        #expect(info.symbols == ["⇧", "⌘", "I"])
+        info.action()
         #expect(state.isVisible)
         #expect(state.selectedPanel == .info)
 
-        try #require(options.first { $0.title == "Close Sidecar" }).action()
+        let close = try #require(options.first {
+            $0.title == "Close Sidecar"
+        })
+        #expect(close.symbols == ["⇧", "⌘", "W"])
+        close.action()
         #expect(!state.isVisible)
 
         let toggle = try #require(options.first { $0.title == "Toggle Sidecar" })
-        #expect(toggle.symbols == ["⌃", "⌘", "S"])
+        #expect(toggle.symbols == ["⇧", "⌘", "S"])
         toggle.action()
         #expect(state.isVisible)
     }
 
-    @Test @MainActor func viewMenuUsesStandardSidebarShortcut() throws {
+    @Test @MainActor func viewMenuExposesConfigurableBindings() throws {
         let viewMenu = NSMenu(title: "View")
         let inspector = NSMenuItem(
             title: "Terminal Inspector",
@@ -597,11 +688,15 @@ struct SidecarStateTests {
 
         SidecarMenuInstaller.install(before: inspector)
 
-        let toggle = try #require(
-            viewMenu.items.first { $0.action == #selector(BaseTerminalController.toggleSidecar(_:)) }
-        )
-        #expect(toggle.keyEquivalent == "s")
-        #expect(toggle.keyEquivalentModifierMask == [.control, .command])
+        let bindings = SidecarMenuInstaller.bindings(before: inspector)
+        #expect(bindings.map(\.action) == [
+            "sidecar:toggle",
+            "sidecar:info",
+            "sidecar:outline",
+            "sidecar:git",
+            "sidecar:files",
+        ])
+        #expect(bindings.allSatisfy { $0.item.keyEquivalent.isEmpty })
     }
 }
 

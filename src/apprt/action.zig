@@ -348,6 +348,9 @@ pub const Action = union(Key) {
     /// otherwise the terminal-set title.
     copy_title_to_clipboard,
 
+    /// Control the macOS Sidecar.
+    sidecar: Sidecar,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -416,6 +419,7 @@ pub const Action = union(Key) {
         search_selected,
         readonly,
         copy_title_to_clipboard,
+        sidecar,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -609,6 +613,21 @@ pub const Inspector = enum(c_int) {
 
     test "ghostty.h Inspector" {
         try lib.checkGhosttyHEnum(Inspector, "GHOSTTY_INSPECTOR_");
+    }
+};
+
+/// The requested Sidecar visibility or panel.
+pub const Sidecar = enum(c_int) {
+    toggle,
+    show,
+    hide,
+    info,
+    outline,
+    git,
+    files,
+
+    test "ghostty.h Sidecar" {
+        try lib.checkGhosttyHEnum(Sidecar, "GHOSTTY_SIDECAR_");
     }
 };
 

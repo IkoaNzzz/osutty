@@ -47,8 +47,8 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
     // The required view model
     @ObservedObject var viewModel: ViewModel
 
-    // SidecarState is nested inside the view model, so observe it directly.
-    @ObservedObject private var sidecarState: SidecarState
+    // Child Sidecar views observe presentation and selection independently.
+    private let sidecarState: SidecarState
 
     // An optional delegate to receive information about terminal changes.
     weak var delegate: (any TerminalViewDelegate)?

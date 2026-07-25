@@ -596,6 +596,13 @@ extension Ghostty {
             case GHOSTTY_ACTION_TOGGLE_COMMAND_PALETTE:
                 toggleCommandPalette(app, target: target)
 
+            case GHOSTTY_ACTION_SIDECAR:
+                #if os(macOS)
+                controlSidecar(app, mode: action.action.sidecar)
+                #else
+                return false
+                #endif
+
             case GHOSTTY_ACTION_TOGGLE_MAXIMIZE:
                 toggleMaximize(app, target: target)
 
@@ -1027,6 +1034,42 @@ extension Ghostty {
                 assertionFailure()
             }
         }
+
+        #if os(macOS)
+        private static func controlSidecar(
+            _ app: ghostty_app_t,
+            mode: ghostty_action_sidecar_e
+        ) {
+            guard let appUserdata = ghostty_app_userdata(app) else { return }
+            let ghostty = Unmanaged<App>
+                .fromOpaque(appUserdata)
+                .takeUnretainedValue()
+
+            DispatchQueue.main.async {
+                let state = ghostty.sidecarState
+                switch mode {
+                case GHOSTTY_SIDECAR_TOGGLE:
+                    state.toggle()
+                case GHOSTTY_SIDECAR_SHOW:
+                    state.isVisible = true
+                case GHOSTTY_SIDECAR_HIDE:
+                    state.hide()
+                case GHOSTTY_SIDECAR_INFO:
+                    state.show(.info)
+                case GHOSTTY_SIDECAR_OUTLINE:
+                    state.show(.outline)
+                case GHOSTTY_SIDECAR_GIT:
+                    state.show(.git)
+                case GHOSTTY_SIDECAR_FILES:
+                    state.show(.files)
+                default:
+                    Ghostty.logger.warning(
+                        "unknown Sidecar mode raw=\(mode.rawValue, privacy: .public)"
+                    )
+                }
+            }
+        }
+        #endif
 
         private static func toggleMaximize(
             _ app: ghostty_app_t,

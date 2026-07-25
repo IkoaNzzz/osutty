@@ -4,9 +4,11 @@ import SwiftUI
 struct SidecarView: View {
     @EnvironmentObject private var ghostty: Ghostty.App
     @StateObject private var outlineModel = SidecarOutlineModel()
+    @StateObject private var gitModel = SidecarGitModel()
+    @StateObject private var filesModel = SidecarFilesModel()
 
-    @ObservedObject var state: SidecarState
-    let surfaceView: Ghostty.SurfaceView?
+    @ObservedObject var selection: SidecarSelectionState
+    let surface: SidecarSurfaceContext?
 
     private var theme: SidecarTheme {
         SidecarTheme(
@@ -18,13 +20,12 @@ struct SidecarView: View {
     var body: some View {
         SidecarChrome(theme: theme) {
             VStack(spacing: 0) {
-                SidecarTabBar(selection: $state.selectedPanel)
+                SidecarTabBar(selection: $selection.selectedPanel)
 
                 ZStack {
                     Group {
-                        if let surfaceView {
-                            panelContent(surfaceView: surfaceView)
-                                .id("\(surfaceView.id)-\(state.selectedPanel.rawValue)")
+                        if let surface {
+                            panelContent(surface: surface)
                         } else {
                             SidecarEmptyView(
                                 title: "No Active Terminal",
@@ -37,7 +38,7 @@ struct SidecarView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-                .animation(SidecarMetrics.contentAnimation, value: state.selectedPanel)
+                .animation(SidecarMetrics.contentAnimation, value: selection.selectedPanel)
             }
         }
         .accessibilityElement(children: .contain)
@@ -46,22 +47,28 @@ struct SidecarView: View {
     }
 
     @ViewBuilder
-    private func panelContent(surfaceView: Ghostty.SurfaceView) -> some View {
-        switch state.selectedPanel {
+    private func panelContent(surface: SidecarSurfaceContext) -> some View {
+        switch selection.selectedPanel {
         case .info:
-            SidecarInfoView(surfaceView: surfaceView)
+            SidecarInfoView(surface: surface)
 
         case .outline:
             SidecarOutlineView(
                 model: outlineModel,
-                surfaceView: surfaceView
+                surface: surface
             )
 
         case .git:
-            SidecarGitView(surfaceView: surfaceView)
+            SidecarGitView(
+                model: gitModel,
+                surface: surface
+            )
 
         case .files:
-            SidecarFilesView(surfaceView: surfaceView)
+            SidecarFilesView(
+                model: filesModel,
+                surface: surface
+            )
         }
     }
 }

@@ -1,17 +1,51 @@
 import AppKit
 import SwiftUI
 
-/// Application-scoped presentation state for the terminal sidecar.
-///
-/// Ghostty.App owns one instance so visibility, panel selection, and width
-/// remain stable while switching native tabs or terminal windows.
 @MainActor
-final class SidecarState: ObservableObject {
+final class SidecarPresentationState: ObservableObject {
+    @Published var isVisible: Bool
+    @Published var width: CGFloat
+
+    init(isVisible: Bool, width: CGFloat) {
+        self.isVisible = isVisible
+        self.width = width
+    }
+}
+
+@MainActor
+final class SidecarSelectionState: ObservableObject {
+    @Published var selectedPanel: SidecarPanel
+
+    init(selectedPanel: SidecarPanel) {
+        self.selectedPanel = selectedPanel
+    }
+}
+
+/// Application-scoped state for the terminal Sidecar.
+///
+/// Presentation and panel selection are observed independently so switching a
+/// panel cannot invalidate the terminal layout.
+@MainActor
+final class SidecarState {
     nonisolated static let defaultWidth: CGFloat = 224
 
-    @Published var isVisible: Bool
-    @Published var selectedPanel: SidecarPanel
-    @Published var width: CGFloat
+    let presentation: SidecarPresentationState
+    let selection: SidecarSelectionState
+
+    var isVisible: Bool {
+        get { presentation.isVisible }
+        set { presentation.isVisible = newValue }
+    }
+
+    var selectedPanel: SidecarPanel {
+        get { selection.selectedPanel }
+        set { selection.selectedPanel = newValue }
+    }
+
+    var width: CGFloat {
+        get { presentation.width }
+        set { presentation.width = newValue }
+    }
 
     init(
         isVisible: Bool? = nil,
@@ -22,10 +56,11 @@ final class SidecarState: ObservableObject {
         // CLI configuration parser never sees a synthetic config field.
         let environmentStartsVisible =
             ProcessInfo.processInfo.environment["GHOSTTY_SIDECAR_VISIBLE"] == "1"
-        self.isVisible = isVisible
-            ?? environmentStartsVisible
-        self.selectedPanel = selectedPanel
-        self.width = width
+        self.presentation = .init(
+            isVisible: isVisible ?? environmentStartsVisible,
+            width: width
+        )
+        self.selection = .init(selectedPanel: selectedPanel)
     }
 
     func show(_ panel: SidecarPanel) {
@@ -86,15 +121,29 @@ enum SidecarPanel: String, CaseIterable, Identifiable {
         case .files: "folder"
         }
     }
+
+    var bindingAction: SidecarBindingAction {
+        switch self {
+        case .info: .info
+        case .outline: .outline
+        case .git: .git
+        case .files: .files
+        }
+    }
 }
 
-enum SidecarShortcut {
-    static let keyEquivalent = "s"
-    static let modifierMask: NSEvent.ModifierFlags = [.control, .command]
-    static let keyboardShortcut = KeyboardShortcut(
-        KeyEquivalent("s"),
-        modifiers: [.control, .command]
-    )
+enum SidecarBindingAction: String {
+    case toggle
+    case show
+    case hide
+    case info
+    case outline
+    case git
+    case files
+
+    var configValue: String {
+        "sidecar:\(rawValue)"
+    }
 }
 
 @MainActor
@@ -120,8 +169,6 @@ enum SidecarMenuInstaller {
             systemSymbolName: "sidebar.right",
             accessibilityDescription: "Toggle Sidecar"
         )
-        toggleItem.keyEquivalent = SidecarShortcut.keyEquivalent
-        toggleItem.keyEquivalentModifierMask = SidecarShortcut.modifierMask
         menu.insertItem(toggleItem, at: inspectorIndex)
 
         let panelMenu = NSMenu(title: "Sidecar Panel")
@@ -146,5 +193,38 @@ enum SidecarMenuInstaller {
         )
         panelItem.submenu = panelMenu
         menu.insertItem(panelItem, at: inspectorIndex + 1)
+    }
+
+    static func bindings(
+        before terminalInspector: NSMenuItem?
+    ) -> [(action: String, item: NSMenuItem)] {
+        guard let menu = terminalInspector?.menu else { return [] }
+
+        var result: [(action: String, item: NSMenuItem)] = []
+        if let toggleItem = menu.items.first(where: {
+            $0.action == #selector(BaseTerminalController.toggleSidecar(_:))
+        }) {
+            result.append((
+                SidecarBindingAction.toggle.configValue,
+                toggleItem
+            ))
+        }
+
+        guard let panelMenu = menu.items
+            .first(where: { $0.submenu?.items.contains(where: {
+                $0.action == #selector(BaseTerminalController.showSidecarPanel(_:))
+            }) == true })?
+            .submenu else {
+            return result
+        }
+
+        result.append(contentsOf: panelMenu.items.compactMap { item in
+            guard item.action == #selector(BaseTerminalController.showSidecarPanel(_:)),
+                  let panel = SidecarPanel(menuTag: item.tag) else {
+                return nil
+            }
+            return (panel.bindingAction.configValue, item)
+        })
+        return result
     }
 }

@@ -2,15 +2,13 @@ import AppKit
 import SwiftUI
 
 struct SidecarGitView: View {
-    @ObservedObject var surfaceView: Ghostty.SurfaceView
-
-    @StateObject private var model = SidecarGitModel()
+    @ObservedObject var model: SidecarGitModel
+    @ObservedObject var surface: SidecarSurfaceContext
     @StateObject private var commitWindow = SidecarCommitWindowController()
-    @State private var installedEditors: [SidecarGitEditor] = []
     @State private var lifecycleID = UUID()
 
     private var workingDirectory: URL? {
-        guard let pwd = surfaceView.pwd, !pwd.isEmpty else { return nil }
+        guard let pwd = surface.pwd, !pwd.isEmpty else { return nil }
         return URL(fileURLWithPath: pwd, isDirectory: true)
     }
 
@@ -30,15 +28,21 @@ struct SidecarGitView: View {
         }
         .task(id: workingDirectory) {
             guard let workingDirectory else { return }
-            installedEditors = SidecarGitEditor.known.filter {
-                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleIdentifier) != nil
-            }
             model.setWorkingDirectory(workingDirectory)
 
+            var unchangedRefreshes = 0
             while !Task.isCancelled {
-                await model.refresh()
+                let changed = await model.refresh()
+                unchangedRefreshes = changed
+                    ? 0
+                    : min(unchangedRefreshes + 1, 3)
+                let delay = switch unchangedRefreshes {
+                case 0: Duration.seconds(3)
+                case 1: Duration.seconds(5)
+                default: Duration.seconds(10)
+                }
                 do {
-                    try await Task.sleep(for: .seconds(3))
+                    try await Task.sleep(for: delay)
                 } catch {
                     return
                 }
@@ -190,7 +194,7 @@ struct SidecarGitView: View {
     ) -> some View {
         let buttonTitle = isStagedSection ? "Unstage all" : "Stage all"
 
-        return VStack(alignment: .leading, spacing: 0) {
+        return LazyVStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("\(title) (\(changes.count))")
                     .font(.system(size: 10, weight: .medium))
@@ -214,9 +218,7 @@ struct SidecarGitView: View {
                     stageHelp: change.isConflict
                         ? "Resolve this conflict outside the Sidecar."
                         : (isStagedSection ? "Unstage File" : "Stage File"),
-                    openEnabled: FileManager.default.fileExists(
-                        atPath: changedFileURL(change, snapshot: snapshot).path
-                    ),
+                    openEnabled: snapshot.availablePaths.contains(change.path),
                     isOperating: model.isOperating,
                     onStage: {
                         rowAction(change)
@@ -274,7 +276,7 @@ struct SidecarGitView: View {
             .fixedSize()
             .disabled(model.isOperating)
 
-            let editor = installedEditors.first
+            let editor = SidecarEditorCatalog.gitEditors.first
             ControlGroup {
                 Button {
                     open(snapshot.repositoryRoot, in: editor)
@@ -285,12 +287,12 @@ struct SidecarGitView: View {
                 }
 
                 Menu {
-                    if installedEditors.isEmpty {
+                    if SidecarEditorCatalog.gitEditors.isEmpty {
                         Button("Reveal in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([snapshot.repositoryRoot])
                         }
                     } else {
-                        ForEach(installedEditors) { item in
+                        ForEach(SidecarEditorCatalog.gitEditors) { item in
                             Button(item.name) {
                                 open(snapshot.repositoryRoot, in: item)
                             }
@@ -309,7 +311,7 @@ struct SidecarGitView: View {
         }
     }
 
-    private func open(_ url: URL, in editor: SidecarGitEditor?) {
+    private func open(_ url: URL, in editor: SidecarEditor?) {
         guard let editor,
               let applicationURL = NSWorkspace.shared.urlForApplication(
                   withBundleIdentifier: editor.bundleIdentifier
@@ -338,7 +340,7 @@ struct SidecarGitView: View {
     ) {
         let fileURL = changedFileURL(change, snapshot: snapshot)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        open(fileURL, in: installedEditors.first)
+        open(fileURL, in: SidecarEditorCatalog.gitEditors.first)
     }
 
     private func synchronizationDescription(_ snapshot: SidecarGitSnapshot) -> String {
@@ -371,20 +373,6 @@ struct SidecarGitView: View {
         guard !reference.isEmpty else { return }
         completion(reference)
     }
-}
-
-private struct SidecarGitEditor: Identifiable {
-    let name: String
-    let bundleIdentifier: String
-
-    var id: String { bundleIdentifier }
-
-    static let known: [SidecarGitEditor] = [
-        .init(name: "Cursor", bundleIdentifier: "com.todesktop.230313mzl4w4u92"),
-        .init(name: "VS Code", bundleIdentifier: "com.microsoft.VSCode"),
-        .init(name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode"),
-        .init(name: "Zed", bundleIdentifier: "dev.zed.Zed"),
-    ]
 }
 
 private struct SidecarGitChangeRow: View {

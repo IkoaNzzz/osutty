@@ -2,14 +2,12 @@ import AppKit
 import SwiftUI
 
 struct SidecarInfoView: View {
-    @ObservedObject var surfaceView: Ghostty.SurfaceView
+    @ObservedObject var surface: SidecarSurfaceContext
 
     @State private var processSnapshot = SidecarProcessSnapshot.empty
-    @State private var currentDate = Date()
-    @State private var installedEditors: [SidecarEditor] = []
 
     private var workingDirectory: URL? {
-        guard let pwd = surfaceView.pwd, !pwd.isEmpty else { return nil }
+        guard let pwd = surface.pwd, !pwd.isEmpty else { return nil }
         return URL(fileURLWithPath: pwd, isDirectory: true)
     }
 
@@ -17,14 +15,14 @@ struct SidecarInfoView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: SidecarMetrics.sectionSpacing) {
                 workspaceSection
-                processSection
+                SidecarProcessSection(snapshot: processSnapshot)
                 portsSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
             .padding(.bottom, SidecarMetrics.contentPadding)
         }
-        .task(id: surfaceView.id) {
+        .task(id: surface.id) {
             await refreshProcessLoop()
         }
     }
@@ -49,7 +47,7 @@ struct SidecarInfoView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([workingDirectory])
                 }
 
-                ForEach(installedEditors) { editor in
+                ForEach(SidecarEditorCatalog.infoEditors) { editor in
                     SidecarActionButton(
                         title: "Open in \(editor.name)",
                         systemImage: "arrow.up.forward.app"
@@ -61,32 +59,6 @@ struct SidecarInfoView: View {
                 Text("Waiting for shell integration to report a directory.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var processSection: some View {
-        SidecarSection("Process") {
-            if processSnapshot.processes.isEmpty {
-                Text("No foreground process")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(processSnapshot.processes) { process in
-                    SidecarStatusRow(
-                        systemImage: process.id == processSnapshot.processes.first?.id
-                            ? "circle.fill"
-                            : "arrow.turn.down.right",
-                        title: process.name,
-                        subtitle: "PID \(process.pid)"
-                    ) {
-                        Text(process.startedAt.relativeDuration(to: currentDate))
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                }
             }
         }
     }
@@ -135,19 +107,26 @@ struct SidecarInfoView: View {
     }
 
     private func refreshProcessLoop() async {
-        installedEditors = SidecarEditor.known.filter {
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleIdentifier) != nil
-        }
-
+        var unchangedRefreshes = 0
         while !Task.isCancelled {
-            let foregroundPID = surfaceView.surfaceModel?.foregroundPID
-            processSnapshot = await SidecarProcessService.shared.snapshot(
+            let foregroundPID = surface.surfaceView.surfaceModel?.foregroundPID
+            let refreshed = await SidecarProcessService.shared.snapshot(
                 foregroundPID: foregroundPID
             )
-            currentDate = Date()
+            guard !Task.isCancelled else { return }
+            let changed = refreshed != processSnapshot
+            if changed {
+                processSnapshot = refreshed
+            }
+            unchangedRefreshes = changed
+                ? 0
+                : min(unchangedRefreshes + 1, 2)
+            let delay = unchangedRefreshes == 0
+                ? Duration.seconds(1)
+                : Duration.seconds(unchangedRefreshes + 1)
 
             do {
-                try await Task.sleep(for: .seconds(1))
+                try await Task.sleep(for: delay)
             } catch {
                 return
             }
@@ -155,18 +134,35 @@ struct SidecarInfoView: View {
     }
 }
 
-private struct SidecarEditor: Identifiable {
-    let name: String
-    let bundleIdentifier: String
+private struct SidecarProcessSection: View {
+    let snapshot: SidecarProcessSnapshot
 
-    var id: String { bundleIdentifier }
-
-    static let known: [SidecarEditor] = [
-        .init(name: "VS Code", bundleIdentifier: "com.microsoft.VSCode"),
-        .init(name: "Cursor", bundleIdentifier: "com.todesktop.230313mzl4w4u92"),
-        .init(name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode"),
-        .init(name: "Zed", bundleIdentifier: "dev.zed.Zed"),
-    ]
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            SidecarSection("Process") {
+                if snapshot.processes.isEmpty {
+                    Text("No foreground process")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(snapshot.processes) { process in
+                        SidecarStatusRow(
+                            systemImage: process.id == snapshot.processes.first?.id
+                                ? "circle.fill"
+                                : "arrow.turn.down.right",
+                            title: process.name,
+                            subtitle: "PID \(process.pid)"
+                        ) {
+                            Text(process.startedAt.relativeDuration(to: timeline.date))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private extension URL {

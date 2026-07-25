@@ -2,23 +2,20 @@ import AppKit
 import SwiftUI
 
 struct SidecarFilesView: View {
-    @ObservedObject var surfaceView: Ghostty.SurfaceView
-
-    @StateObject private var model = SidecarFilesModel()
+    @ObservedObject var model: SidecarFilesModel
+    @ObservedObject var surface: SidecarSurfaceContext
     @StateObject private var quickLook = SidecarQuickLookController()
-    @State private var followsTerminalDirectory = true
-    @State private var hoveredEntry: URL?
     @FocusState private var focusedControl: FocusTarget?
 
     private var terminalDirectory: URL? {
-        guard let pwd = surfaceView.pwd, !pwd.isEmpty else { return nil }
+        guard let pwd = surface.pwd, !pwd.isEmpty else { return nil }
         return URL(fileURLWithPath: pwd, isDirectory: true)
     }
 
     private var quickLookKeyEnabled: Bool {
         guard case .file(let url) = focusedControl else { return false }
         guard model.selection == url else { return false }
-        return entry(for: url)?.isDirectory == false
+        return model.selectedEntry?.isDirectory == false
     }
 
     var body: some View {
@@ -39,7 +36,7 @@ struct SidecarFilesView: View {
         .padding(.bottom, 7)
         .background {
             SidecarQuickLookKeyMonitor(
-                window: surfaceView.window,
+                window: surface.surfaceView.window,
                 isEnabled: quickLookKeyEnabled
             ) {
                 quickLookSelection()
@@ -47,11 +44,11 @@ struct SidecarFilesView: View {
             .frame(width: 0, height: 0)
         }
         .task(id: terminalDirectory) {
-            guard followsTerminalDirectory, let terminalDirectory else { return }
-            model.setRoot(terminalDirectory)
+            guard let terminalDirectory else { return }
+            model.setTerminalRoot(terminalDirectory)
         }
         .onChange(of: model.showsHiddenFiles) { _ in
-            model.reload()
+            model.reloadForVisibilityChange()
         }
         .onDisappear {
             model.cancelAll()
@@ -67,8 +64,7 @@ struct SidecarFilesView: View {
                 help: "Go to Parent Folder"
             ) {
                 guard let root = model.root else { return }
-                followsTerminalDirectory = false
-                model.setRoot(root.deletingLastPathComponent())
+                model.browse(root.deletingLastPathComponent())
             }
 
             SidecarToolbarButton(
@@ -160,7 +156,6 @@ struct SidecarFilesView: View {
                     }
                 }
             }
-            .animation(SidecarMetrics.disclosureAnimation, value: model.rows)
         }
     }
 
@@ -188,77 +183,74 @@ struct SidecarFilesView: View {
     }
 
     private func fileRow(_ row: SidecarFileRow) -> some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: CGFloat(row.depth) * SidecarMetrics.rowIndent)
+        SidecarFileHoverRow(isSelected: model.selection == row.entry.url) {
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: CGFloat(row.depth) * SidecarMetrics.rowIndent)
 
-            if row.entry.isDirectory, !row.entry.isSymbolicLink {
-                Button {
-                    withAnimation(SidecarMetrics.disclosureAnimation) {
-                        model.toggle(row.entry)
+                if row.entry.isDirectory, !row.entry.isSymbolicLink {
+                    Button {
+                        withAnimation(SidecarMetrics.disclosureAnimation) {
+                            model.toggle(row.entry)
+                        }
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(model.isExpanded(row.entry) ? 90 : 0))
+                            .frame(width: SidecarMetrics.rowIndent)
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
                     }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(model.isExpanded(row.entry) ? 90 : 0))
+                    .buttonStyle(.plain)
+                    .sidecarFocusEffectDisabled()
+                    .help(model.isExpanded(row.entry) ? "Collapse Folder" : "Expand Folder")
+                    .accessibilityLabel(
+                        model.isExpanded(row.entry)
+                            ? "Collapse \(row.entry.name)"
+                            : "Expand \(row.entry.name)"
+                    )
+                } else {
+                    Color.clear
                         .frame(width: SidecarMetrics.rowIndent)
-                        .frame(maxHeight: .infinity)
-                        .contentShape(Rectangle())
+                }
+
+                Button {
+                    model.select(row.entry)
+                    focusFileRow(row.entry.url)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: row.entry.systemImage)
+                            .font(.system(size: 11))
+                            .frame(width: 14)
+                            .foregroundStyle(
+                                row.entry.isDirectory
+                                    ? Color.accentColor
+                                    : Color.primary.opacity(0.6)
+                            )
+
+                        Text(row.entry.name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.trailing, SidecarMetrics.compactContentPadding)
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: .leading
+                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focusable()
+                .focused($focusedControl, equals: .file(row.entry.url))
                 .sidecarFocusEffectDisabled()
-                .help(model.isExpanded(row.entry) ? "Collapse Folder" : "Expand Folder")
-                .accessibilityLabel(
-                    model.isExpanded(row.entry) ? "Collapse \(row.entry.name)" : "Expand \(row.entry.name)"
-                )
-            } else {
-                Color.clear
-                    .frame(width: SidecarMetrics.rowIndent)
+                .accessibilityLabel(row.entry.name)
+                .accessibilityValue(row.entry.isDirectory ? "Directory" : "File")
             }
-
-            Button {
-                model.selection = row.entry.url
-                focusFileRow(row.entry.url)
-            } label: {
-                HStack(spacing: 6) {
-                Image(systemName: row.entry.systemImage)
-                    .font(.system(size: 11))
-                        .frame(width: 14)
-                    .foregroundStyle(
-                        row.entry.isDirectory
-                            ? Color.accentColor
-                            : Color.primary.opacity(0.6)
-                    )
-
-                Text(row.entry.name)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-                .padding(.trailing, SidecarMetrics.compactContentPadding)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focusable()
-            .focused($focusedControl, equals: .file(row.entry.url))
-            .sidecarFocusEffectDisabled()
-            .accessibilityLabel(row.entry.name)
-            .accessibilityValue(row.entry.isDirectory ? "Directory" : "File")
         }
-        .frame(height: SidecarMetrics.rowHeight)
-        .background {
-            Rectangle()
-                .fill(fileRowBackground(for: row.entry.url))
-        }
-        .contentShape(Rectangle())
-        .onHover { isHovering in
-            hoveredEntry = isHovering ? row.entry.url : nil
-        }
-        .animation(SidecarMetrics.contentAnimation, value: model.selection)
-        .animation(SidecarMetrics.contentAnimation, value: hoveredEntry)
         .contextMenu {
             fileContextMenu(row.entry)
         }
@@ -267,11 +259,10 @@ struct SidecarFilesView: View {
     private func searchResultRow(_ entry: SidecarFileEntry) -> some View {
         Button {
             if entry.isDirectory {
-                followsTerminalDirectory = false
                 model.searchQuery = ""
-                model.setRoot(entry.url)
+                model.browse(entry.url)
             } else {
-                model.selection = entry.url
+                model.select(entry)
             }
             focusFileRow(entry.url)
         } label: {
@@ -305,13 +296,9 @@ struct SidecarFilesView: View {
         .focused($focusedControl, equals: .file(entry.url))
         .sidecarFocusEffectDisabled()
         .frame(maxWidth: .infinity)
-        .background {
-            Rectangle()
-                .fill(fileRowBackground(for: entry.url))
-        }
-        .onHover { isHovering in
-            hoveredEntry = isHovering ? entry.url : nil
-        }
+        .modifier(SidecarFileHoverModifier(
+            isSelected: model.selection == entry.url
+        ))
         .contextMenu {
             fileContextMenu(entry)
         }
@@ -333,26 +320,11 @@ struct SidecarFilesView: View {
     }
 
     private func quickLookSelection() {
-        guard let selection = model.selection,
-              entry(for: selection)?.isDirectory == false else {
+        guard let entry = model.selectedEntry,
+              !entry.isDirectory else {
             return
         }
-        quickLook.toggle(selection)
-    }
-
-    private func entry(for url: URL) -> SidecarFileEntry? {
-        model.rows.first(where: { $0.entry.url == url })?.entry
-            ?? model.searchResults.first(where: { $0.url == url })
-    }
-
-    private func fileRowBackground(for url: URL) -> Color {
-        if model.selection == url {
-            return Color.primary.opacity(0.075)
-        }
-        if hoveredEntry == url {
-            return Color.primary.opacity(0.035)
-        }
-        return .clear
+        quickLook.toggle(entry.url)
     }
 
     private func focusFileRow(_ url: URL) {
@@ -372,8 +344,66 @@ struct SidecarFilesView: View {
         panel.canCreateDirectories = false
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        followsTerminalDirectory = false
-        model.setRoot(url)
+        model.browse(url)
+    }
+}
+
+private struct SidecarFileHoverRow<Content: View>: View {
+    let isSelected: Bool
+    let content: Content
+
+    @State private var isHovering = false
+
+    init(
+        isSelected: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.isSelected = isSelected
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(height: SidecarMetrics.rowHeight)
+            .background {
+                Rectangle()
+                    .fill(backgroundColor)
+            }
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .animation(SidecarMetrics.contentAnimation, value: isHovering)
+            .animation(SidecarMetrics.contentAnimation, value: isSelected)
+    }
+
+    private var backgroundColor: Color {
+        if isSelected {
+            return Color.primary.opacity(0.075)
+        }
+        return isHovering ? Color.primary.opacity(0.035) : .clear
+    }
+}
+
+private struct SidecarFileHoverModifier: ViewModifier {
+    let isSelected: Bool
+
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                Rectangle()
+                    .fill(backgroundColor)
+            }
+            .onHover { isHovering = $0 }
+            .animation(SidecarMetrics.contentAnimation, value: isHovering)
+            .animation(SidecarMetrics.contentAnimation, value: isSelected)
+    }
+
+    private var backgroundColor: Color {
+        if isSelected {
+            return Color.primary.opacity(0.075)
+        }
+        return isHovering ? Color.primary.opacity(0.035) : .clear
     }
 }
 

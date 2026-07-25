@@ -1200,6 +1200,13 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "toggle_window_float_on_top", menuItem: self.menuFloatOnTop)
         syncMenuShortcut(config, action: "inspector:toggle", menuItem: self.menuTerminalInspector)
         syncMenuShortcut(config, action: "toggle_command_palette", menuItem: self.menuCommandPalette)
+        for binding in SidecarMenuInstaller.bindings(before: menuTerminalInspector) {
+            syncMenuShortcut(
+                config,
+                action: binding.action,
+                menuItem: binding.item
+            )
+        }
 
         syncMenuShortcut(config, action: "toggle_secure_input", menuItem: self.menuSecureInput)
 
