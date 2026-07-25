@@ -9,6 +9,17 @@ struct SidecarView: View {
 
     @ObservedObject var selection: SidecarSelectionState
     let surface: SidecarSurfaceContext?
+    let usesExternalChrome: Bool
+
+    init(
+        selection: SidecarSelectionState,
+        surface: SidecarSurfaceContext?,
+        usesExternalChrome: Bool = false
+    ) {
+        self.selection = selection
+        self.surface = surface
+        self.usesExternalChrome = usesExternalChrome
+    }
 
     private var theme: SidecarTheme {
         SidecarTheme(
@@ -18,7 +29,10 @@ struct SidecarView: View {
     }
 
     var body: some View {
-        SidecarChrome(theme: theme) {
+        SidecarChrome(
+            theme: theme,
+            usesExternalChrome: usesExternalChrome
+        ) {
             VStack(spacing: 0) {
                 SidecarTabBar(selection: $selection.selectedPanel)
 
@@ -93,10 +107,55 @@ struct SidecarTheme {
 /// Native material card shared by the live Sidecar and its render tests.
 struct SidecarChrome<Content: View>: View {
     let theme: SidecarTheme
+    let usesExternalChrome: Bool
     let content: Content
 
-    init(theme: SidecarTheme, @ViewBuilder content: () -> Content) {
+    init(
+        theme: SidecarTheme,
+        usesExternalChrome: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
         self.theme = theme
+        self.usesExternalChrome = usesExternalChrome
+        self.content = content()
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if usesExternalChrome {
+            content
+                .environment(\.colorScheme, theme.colorScheme)
+        } else {
+            SidecarChromeSurface(
+                backgroundColor: theme.backgroundColor,
+                backgroundOpacity: theme.backgroundOpacity,
+                shadowOpacity: theme.colorScheme == .dark ? 0.3 : 0.14
+            ) {
+                content
+            }
+            .environment(\.colorScheme, theme.colorScheme)
+        }
+    }
+}
+
+struct SidecarChromeSurface<Content: View>: View {
+    let backgroundColor: Color
+    let backgroundOpacity: Double
+    let shadowOpacity: Double
+    let usesMaterial: Bool
+    let content: Content
+
+    init(
+        backgroundColor: Color,
+        backgroundOpacity: Double,
+        shadowOpacity: Double,
+        usesMaterial: Bool = true,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.backgroundColor = backgroundColor
+        self.backgroundOpacity = backgroundOpacity
+        self.shadowOpacity = shadowOpacity
+        self.usesMaterial = usesMaterial
         self.content = content()
     }
 
@@ -104,10 +163,15 @@ struct SidecarChrome<Content: View>: View {
         content
             .background {
                 ZStack {
-                    Rectangle()
-                        .fill(.regularMaterial)
-                    theme.backgroundColor
-                        .opacity(theme.backgroundOpacity * 0.72)
+                    if usesMaterial {
+                        Rectangle()
+                            .fill(.regularMaterial)
+                        backgroundColor
+                            .opacity(backgroundOpacity * 0.72)
+                    } else {
+                        backgroundColor
+                            .opacity(max(backgroundOpacity, 0.94))
+                    }
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -116,11 +180,10 @@ struct SidecarChrome<Content: View>: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
             .shadow(
-                color: .black.opacity(theme.colorScheme == .dark ? 0.3 : 0.14),
+                color: .black.opacity(shadowOpacity),
                 radius: 8,
                 y: 3
             )
-            .environment(\.colorScheme, theme.colorScheme)
     }
 }
 

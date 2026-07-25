@@ -3,6 +3,11 @@ import GhosttyKit
 import SwiftUI
 
 extension Ghostty {
+    struct SurfaceGridSize: Equatable, Sendable {
+        let columns: UInt16
+        let rows: UInt16
+    }
+
     class OSSurfaceView: OSView, ObservableObject {
         typealias ID = UUID
 
@@ -42,9 +47,10 @@ extension Ghostty {
         // on supported platforms.
         @Published var focusInstant: ContinuousClock.Instant?
 
-        // Returns sizing information for the surface. This is the raw C
-        // structure because I'm lazy.
-        @Published var surfaceSize: ghostty_surface_size_s?
+        // Grid dimensions used by the resize overlay. Pixel dimensions are
+        // intentionally excluded so point-by-point live resizing does not
+        // invalidate the full SwiftUI surface hierarchy.
+        @Published var surfaceSize: SurfaceGridSize?
 
         /// True when the surface is in readonly mode.
         @Published private(set) var readonly: Bool = false
