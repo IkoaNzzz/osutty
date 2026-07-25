@@ -19,9 +19,7 @@ struct SidecarFileContextMenu: View {
             Button("Open", action: open)
 
             if !entry.isDirectory {
-                Menu("Open in Osutty") {
-                    Button("Current Pane", action: openInCurrentPane)
-                }
+                Button("Open in Osutty", action: openInCurrentPane)
             }
 
             Divider()
