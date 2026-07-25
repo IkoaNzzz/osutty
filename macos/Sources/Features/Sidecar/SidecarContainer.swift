@@ -9,15 +9,14 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
     @Binding private var isVisible: Bool
     @Binding private var sidecarWidth: CGFloat
 
+    @State private var renderedSidecar: Bool
+    @State private var sidecarChromeVisible: Bool
+    @State private var dragStartWidth: CGFloat?
+
     private let primary: Primary
     private let sidecar: Sidecar
     private let reservedAreaColor: Color
     private let reservedAreaOpacity: Double
-
-    private let minimumSidecarWidth: CGFloat = 200
-    private let maximumSidecarWidth: CGFloat = 320
-    private let maximumSidecarFraction: CGFloat = 0.45
-    private let cardInset: CGFloat = 8
 
     init(
         isVisible: Binding<Bool>,
@@ -29,6 +28,8 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
     ) {
         _isVisible = isVisible
         _sidecarWidth = sidecarWidth
+        _renderedSidecar = State(initialValue: isVisible.wrappedValue)
+        _sidecarChromeVisible = State(initialValue: isVisible.wrappedValue)
         self.reservedAreaColor = reservedAreaColor
         self.reservedAreaOpacity = reservedAreaOpacity
         self.primary = primary()
@@ -37,51 +38,186 @@ struct SidecarContainer<Primary: View, Sidecar: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let panelWidth = clampedWidth(
+            let panelWidth = SidecarLayout.clampedWidth(
                 sidecarWidth,
                 availableWidth: geometry.size.width
             )
+            let reservedWidth = isVisible
+                ? SidecarLayout.reservedWidth(panelWidth: panelWidth)
+                : 0
 
             ZStack(alignment: .trailing) {
                 if isVisible {
                     reservedAreaColor
                         .opacity(clampedOpacity(reservedAreaOpacity))
-                        .frame(width: panelWidth + cardInset)
+                        .frame(width: reservedWidth)
                         .frame(maxHeight: .infinity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
-                        .transition(.opacity)
                 }
 
-                HStack(spacing: 0) {
-                    primary
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                primary
+                    .frame(
+                        width: max(0, geometry.size.width - reservedWidth),
+                        height: geometry.size.height
+                    )
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: .leading
+                    )
+                    .animation(nil, value: isVisible)
 
-                    if isVisible {
-                        sidecar
-                            .frame(width: panelWidth)
-                            .frame(maxHeight: .infinity)
-                            .padding(.vertical, cardInset)
-                            .padding(.trailing, cardInset)
-                            .transition(
-                                .move(edge: .trailing)
-                                    .combined(with: .opacity)
-                            )
-                    }
+                if renderedSidecar {
+                    sidecar
+                        .frame(width: panelWidth)
+                        .frame(maxHeight: .infinity)
+                        .padding(.vertical, SidecarLayout.cardInset)
+                        .padding(.trailing, SidecarLayout.cardInset)
+                        .opacity(sidecarChromeVisible ? 1 : 0)
+                        .offset(
+                            x: sidecarChromeVisible
+                                ? 0
+                                : SidecarLayout.reservedWidth(panelWidth: panelWidth)
+                        )
+                }
+
+                if isVisible {
+                    resizeHandle(
+                        panelWidth: panelWidth,
+                        availableWidth: geometry.size.width
+                    )
+                    .offset(
+                        x: -reservedWidth + SidecarLayout.resizeHitWidth / 2
+                    )
                 }
             }
             .clipped()
-            .animation(.easeOut(duration: 0.16), value: isVisible)
+            .task(id: isVisible) {
+                if isVisible {
+                    renderedSidecar = true
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    withAnimation(SidecarLayout.chromeAnimation) {
+                        sidecarChromeVisible = true
+                    }
+                } else {
+                    withAnimation(SidecarLayout.chromeAnimation) {
+                        sidecarChromeVisible = false
+                    }
+                    try? await Task.sleep(for: SidecarLayout.animationDuration)
+                    guard !Task.isCancelled, !isVisible else { return }
+                    renderedSidecar = false
+                }
+            }
         }
     }
 
-    private func clampedWidth(_ width: CGFloat, availableWidth: CGFloat) -> CGFloat {
-        let maximum = min(maximumSidecarWidth, availableWidth * maximumSidecarFraction)
-        return min(max(width, min(minimumSidecarWidth, maximum)), maximum)
+    private func resizeHandle(
+        panelWidth: CGFloat,
+        availableWidth: CGFloat
+    ) -> some View {
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.14))
+                .frame(width: 1)
+        }
+        .frame(width: SidecarLayout.resizeHitWidth)
+        .frame(maxHeight: .infinity)
+        .backport.pointerStyle(.resizeLeftRight)
+        .onHover { isHovered in
+            if #available(macOS 15, *) {
+                return
+            }
+
+            if isHovered {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if dragStartWidth == nil {
+                        dragStartWidth = panelWidth
+                    }
+
+                    sidecarWidth = SidecarLayout.width(
+                        from: dragStartWidth ?? panelWidth,
+                        horizontalTranslation: value.translation.width,
+                        availableWidth: availableWidth
+                    )
+                }
+                .onEnded { _ in
+                    dragStartWidth = nil
+                }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Sidecar resize divider")
+        .accessibilityValue("\(Int(panelWidth)) points")
+        .accessibilityHint("Drag to resize the Sidecar")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAdjustableAction { direction in
+            let adjustment: CGFloat
+            switch direction {
+            case .increment:
+                adjustment = SidecarLayout.accessibilityWidthStep
+            case .decrement:
+                adjustment = -SidecarLayout.accessibilityWidthStep
+            @unknown default:
+                return
+            }
+
+            sidecarWidth = SidecarLayout.clampedWidth(
+                panelWidth + adjustment,
+                availableWidth: availableWidth
+            )
+        }
     }
 
     private func clampedOpacity(_ opacity: Double) -> Double {
         min(max(opacity, 0), 1)
+    }
+}
+
+enum SidecarLayout {
+    static let minimumWidth: CGFloat = 160
+    static let maximumWidth: CGFloat = 520
+    static let maximumWidthFraction: CGFloat = 0.5
+    static let cardInset: CGFloat = 8
+    static let resizeHitWidth: CGFloat = 10
+    static let accessibilityWidthStep: CGFloat = 24
+    static let animationDuration = Duration.milliseconds(160)
+    static let chromeAnimation = Animation.easeOut(duration: 0.16)
+
+    static func clampedWidth(
+        _ width: CGFloat,
+        availableWidth: CGFloat
+    ) -> CGFloat {
+        let maximum = min(
+            maximumWidth,
+            max(0, availableWidth) * maximumWidthFraction
+        )
+        return min(max(width, min(minimumWidth, maximum)), maximum)
+    }
+
+    static func reservedWidth(panelWidth: CGFloat) -> CGFloat {
+        panelWidth + cardInset
+    }
+
+    static func width(
+        from initialWidth: CGFloat,
+        horizontalTranslation: CGFloat,
+        availableWidth: CGFloat
+    ) -> CGFloat {
+        clampedWidth(
+            initialWidth - horizontalTranslation,
+            availableWidth: availableWidth
+        )
     }
 }
 

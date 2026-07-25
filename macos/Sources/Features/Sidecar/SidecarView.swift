@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SidecarView: View {
     @EnvironmentObject private var ghostty: Ghostty.App
+    @StateObject private var outlineModel = SidecarOutlineModel()
 
     @ObservedObject var state: SidecarState
     let surfaceView: Ghostty.SurfaceView?
@@ -52,7 +53,7 @@ struct SidecarView: View {
 
         case .outline:
             SidecarOutlineView(
-                model: state.outlineModel,
+                model: outlineModel,
                 surfaceView: surfaceView
             )
 

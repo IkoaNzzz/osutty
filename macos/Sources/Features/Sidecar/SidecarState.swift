@@ -1,10 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Window-scoped presentation state for the terminal sidecar.
+/// Application-scoped presentation state for the terminal sidecar.
 ///
-/// Keeping this state in one object lets TerminalView observe it without
-/// spreading sidecar-specific properties throughout the terminal controller.
+/// Ghostty.App owns one instance so visibility, panel selection, and width
+/// remain stable while switching native tabs or terminal windows.
 @MainActor
 final class SidecarState: ObservableObject {
     nonisolated static let defaultWidth: CGFloat = 224
@@ -12,7 +12,6 @@ final class SidecarState: ObservableObject {
     @Published var isVisible: Bool
     @Published var selectedPanel: SidecarPanel
     @Published var width: CGFloat
-    let outlineModel = SidecarOutlineModel()
 
     init(
         isVisible: Bool? = nil,
