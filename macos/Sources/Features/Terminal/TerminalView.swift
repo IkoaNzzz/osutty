@@ -98,6 +98,7 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
 
                     TerminalSplitTreeView(
                         tree: viewModel.surfaceTree,
+                        quickEditorManager: sidecarState.quickEditorManager,
                         action: { delegate?.performSplitAction($0) })
                         .environmentObject(ghostty)
                         .ghosttyLastFocusedSurface(lastFocusedSurface)

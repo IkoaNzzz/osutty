@@ -27,6 +27,7 @@ enum TerminalSplitOperation {
 
 struct TerminalSplitTreeView: View {
     let tree: SplitTree<Ghostty.SurfaceView>
+    @ObservedObject var quickEditorManager: SidecarQuickEditorManager
     let action: (TerminalSplitOperation) -> Void
 
     var body: some View {
@@ -34,6 +35,7 @@ struct TerminalSplitTreeView: View {
             TerminalSplitSubtreeView(
                 node: node,
                 isRoot: node == tree.root,
+                quickEditorManager: quickEditorManager,
                 action: action)
             // This is necessary because we can't rely on SwiftUI's implicit
             // structural identity to detect changes to this view. Due to
@@ -49,12 +51,18 @@ private struct TerminalSplitSubtreeView: View {
 
     let node: SplitTree<Ghostty.SurfaceView>.Node
     var isRoot: Bool = false
+    @ObservedObject var quickEditorManager: SidecarQuickEditorManager
     let action: (TerminalSplitOperation) -> Void
 
     var body: some View {
         switch node {
         case .leaf(let leafView):
-            TerminalSplitLeaf(surfaceView: leafView, isSplit: !isRoot, action: action)
+            TerminalSplitLeaf(
+                surfaceView: leafView,
+                isSplit: !isRoot,
+                quickEditorManager: quickEditorManager,
+                action: action
+            )
 
         case .split(let split):
             let splitViewDirection: SplitViewDirection = switch split.direction {
@@ -72,10 +80,18 @@ private struct TerminalSplitSubtreeView: View {
                 dividerColor: ghostty.config.splitDividerColor,
                 resizeIncrements: .init(width: 1, height: 1),
                 left: {
-                    TerminalSplitSubtreeView(node: split.left, action: action)
+                    TerminalSplitSubtreeView(
+                        node: split.left,
+                        quickEditorManager: quickEditorManager,
+                        action: action
+                    )
                 },
                 right: {
-                    TerminalSplitSubtreeView(node: split.right, action: action)
+                    TerminalSplitSubtreeView(
+                        node: split.right,
+                        quickEditorManager: quickEditorManager,
+                        action: action
+                    )
                 },
                 onEqualize: {
                     guard let surface = node.leftmostLeaf().surface else { return }
@@ -89,6 +105,7 @@ private struct TerminalSplitSubtreeView: View {
 private struct TerminalSplitLeaf: View {
     let surfaceView: Ghostty.SurfaceView
     let isSplit: Bool
+    @ObservedObject var quickEditorManager: SidecarQuickEditorManager
     let action: (TerminalSplitOperation) -> Void
 
     @State private var dropState: DropState = .idle
@@ -96,9 +113,20 @@ private struct TerminalSplitLeaf: View {
 
     var body: some View {
         GeometryReader { geometry in
-            Ghostty.InspectableSurface(
-                surfaceView: surfaceView,
-                isSplit: isSplit)
+            Group {
+                if let document = quickEditorManager.document(for: surfaceView.id) {
+                    SidecarQuickEditorPane(
+                        document: document,
+                        manager: quickEditorManager,
+                        surfaceView: surfaceView
+                    )
+                } else {
+                    Ghostty.InspectableSurface(
+                        surfaceView: surfaceView,
+                        isSplit: isSplit
+                    )
+                }
+            }
             .background {
                 // If we're dragging ourself, we hide the entire drop zone. This makes
                 // it so that a released drop animates back to its source properly
@@ -126,7 +154,11 @@ private struct TerminalSplitLeaf: View {
                 }
             }
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Terminal pane")
+            .accessibilityLabel(
+                quickEditorManager.document(for: surfaceView.id) == nil
+                    ? "Terminal pane"
+                    : "Quick Editor pane"
+            )
         }
     }
 

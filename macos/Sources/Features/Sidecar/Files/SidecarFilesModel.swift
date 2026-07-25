@@ -149,6 +149,29 @@ final class SidecarFilesModel: ObservableObject {
         isSearching = false
     }
 
+    func refreshAfterFilesystemChange() {
+        guard let root else { return }
+
+        cancelAll()
+        directoryCache.removeAll(keepingCapacity: true)
+        searchCache.removeAll(keepingCapacity: true)
+        rows = []
+        searchResults = []
+        selectedEntry = nil
+        errorMessage = nil
+
+        load(directory: root, isRoot: true)
+        for directory in expandedDirectories {
+            load(directory: directory, isRoot: false)
+        }
+
+        Task { [weak self, searchService] in
+            await searchService.invalidateSearchIndex(in: root)
+            guard self?.searchQuery.isEmpty == false else { return }
+            self?.search()
+        }
+    }
+
     private func refreshVisibleDirectories() {
         guard let root else { return }
         load(directory: root, isRoot: true)

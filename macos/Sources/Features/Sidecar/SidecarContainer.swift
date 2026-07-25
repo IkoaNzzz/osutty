@@ -351,6 +351,7 @@ private struct SidecarHostModifier: ViewModifier {
                     selection: state.selection,
                     surface: nil,
                     resourceMonitor: state.resourceMonitor,
+                    quickEditorManager: state.quickEditorManager,
                     usesExternalChrome: true
                 )
                 .environmentObject(ghostty)
@@ -402,6 +403,7 @@ private struct SidecarObservedSurfaceHost<Content: View>: View {
                 selection: state.selection,
                 surface: surface,
                 resourceMonitor: state.resourceMonitor,
+                quickEditorManager: state.quickEditorManager,
                 usesExternalChrome: true
             )
             .environmentObject(ghostty)
