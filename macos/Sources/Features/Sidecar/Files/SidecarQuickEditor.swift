@@ -215,7 +215,7 @@ struct SidecarQuickEditorPane: View {
                         get: { document.text },
                         set: { document.replaceText($0) }
                     ),
-                    fileExtension: document.url.pathExtension,
+                    fileName: document.url.lastPathComponent,
                     backgroundColor: NSColor(ghostty.config.backgroundColor)
                 )
             case .failed(let message):
