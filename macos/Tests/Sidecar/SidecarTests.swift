@@ -462,6 +462,61 @@ struct SidecarGitServiceTests {
 }
 
 struct SidecarGitChangeTreeTests {
+    @Test func snapshotNaturallyOrdersFlatChangesByFullPath() {
+        let changes = [
+            change("zeta.txt"),
+            change("sources/file10.swift"),
+            change("alpha.txt"),
+            change("sources/file2.swift"),
+        ]
+        let snapshot = SidecarGitSnapshot(
+            repositoryRoot: URL(fileURLWithPath: "/tmp/repository"),
+            branch: "main",
+            upstream: nil,
+            ahead: 0,
+            behind: 0,
+            remoteURL: nil,
+            insertions: 0,
+            deletions: 0,
+            changes: changes,
+            availablePaths: []
+        )
+
+        #expect(snapshot.unstagedChanges.map(\.path) == [
+            "alpha.txt",
+            "sources/file2.swift",
+            "sources/file10.swift",
+            "zeta.txt",
+        ])
+
+        let refreshed = snapshot.replacingRemoteURL("https://example.com/repository.git")
+        #expect(refreshed.remoteURL == "https://example.com/repository.git")
+        #expect(refreshed.changes == snapshot.changes)
+    }
+
+    @Test func groupsDirectoriesBeforeFilesAtEveryLevel() {
+        let changes = [
+            change("root-z.txt"),
+            change("sources/app.swift"),
+            change("sources/ui/row10.swift"),
+            change("assets/icon.png"),
+            change("root-a.txt"),
+            change("sources/ui/row2.swift"),
+        ]
+
+        #expect(rowOrder(in: SidecarGitChangeTree.rows(for: changes)) == [
+            "D:assets",
+            "F:assets/icon.png",
+            "D:sources",
+            "D:sources/ui",
+            "F:sources/ui/row2.swift",
+            "F:sources/ui/row10.swift",
+            "F:sources/app.swift",
+            "F:root-a.txt",
+            "F:root-z.txt",
+        ])
+    }
+
     @Test func preservesEveryFileAndSupportsCollapsedDirectories() {
         let changes = [
             change("Sources/UI/Row.swift"),
@@ -472,10 +527,10 @@ struct SidecarGitChangeTreeTests {
 
         let expanded = SidecarGitChangeTree.rows(for: changes)
         #expect(changePaths(in: expanded) == [
-            "README.md",
-            "Sources/App.swift",
             "Sources/UI/Pane.swift",
             "Sources/UI/Row.swift",
+            "Sources/App.swift",
+            "README.md",
         ])
         #expect(directoryPaths(in: expanded) == ["Sources", "Sources/UI"])
         #expect(directoryCounts(in: expanded) == ["Sources": 3, "Sources/UI": 2])
@@ -492,8 +547,8 @@ struct SidecarGitChangeTreeTests {
             collapsedDirectories: ["Sources/UI"]
         )
         #expect(changePaths(in: nestedCollapsed) == [
-            "README.md",
             "Sources/App.swift",
+            "README.md",
         ])
         #expect(directoryPaths(in: nestedCollapsed) == ["Sources", "Sources/UI"])
     }
@@ -513,6 +568,17 @@ struct SidecarGitChangeTreeTests {
         rows.compactMap { row in
             guard case .change(let change, _) = row.content else { return nil }
             return change.path
+        }
+    }
+
+    private func rowOrder(in rows: [SidecarGitChangeTreeRow]) -> [String] {
+        rows.map { row in
+            switch row.content {
+            case .directory(let path, _, _):
+                "D:\(path)"
+            case .change(let change, _):
+                "F:\(change.path)"
+            }
         }
     }
 
