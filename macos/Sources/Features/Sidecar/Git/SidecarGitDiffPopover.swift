@@ -34,17 +34,12 @@ struct SidecarGitDiffPopover: View {
 
                 Spacer(minLength: 8)
 
-                Button {
+                SidecarToolbarButton(
+                    systemImage: "xmark",
+                    help: "Close"
+                ) {
                     dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 20, height: 20)
                 }
-                .buttonStyle(.plain)
-                .sidecarFocusEffectDisabled()
-                .foregroundStyle(.secondary)
-                .help("Close")
                 .accessibilityLabel("Close Diff Preview")
             }
             .padding(.horizontal, 12)

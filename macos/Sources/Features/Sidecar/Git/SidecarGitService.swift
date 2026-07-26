@@ -161,7 +161,7 @@ actor SidecarGitService {
                         "--porcelain=v2",
                         "--branch",
                         "--show-stash",
-                        "--untracked-files=normal",
+                        "--untracked-files=all",
                         "-z",
                     ],
                     readOnly: true
