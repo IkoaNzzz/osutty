@@ -185,6 +185,7 @@
 				Features/Sidecar/Files/SidecarQuickLook.swift,
 				Features/Sidecar/Files/SidecarQuickEditor.swift,
 				Features/Sidecar/Git/SidecarCommitWindow.swift,
+				Features/Sidecar/Git/SidecarGitChangeTree.swift,
 				Features/Sidecar/Git/SidecarGitModel.swift,
 				Features/Sidecar/Git/SidecarGitService.swift,
 				Features/Sidecar/Git/SidecarGitView.swift,

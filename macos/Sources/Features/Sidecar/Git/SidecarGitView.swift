@@ -5,6 +5,10 @@ struct SidecarGitView: View {
     @ObservedObject var model: SidecarGitModel
     @ObservedObject var surface: SidecarSurfaceContext
     @StateObject private var commitWindow = SidecarCommitWindowController()
+    @AppStorage("sidecar.git.changePresentation")
+    private var changePresentation = SidecarGitChangePresentation.list
+    @State private var collapsedTreeDirectories = Set<SidecarGitTreeDirectoryID>()
+    @State private var treeRepositoryRoot: URL?
     @State private var lifecycleID = UUID()
 
     private var workingDirectory: URL? {
@@ -112,6 +116,18 @@ struct SidecarGitView: View {
             .padding(.top, 6)
             .padding(.bottom, SidecarMetrics.contentPadding)
         }
+        .onAppear {
+            synchronizeTreeState(repositoryRoot: snapshot.repositoryRoot)
+        }
+        .onChange(of: snapshot.repositoryRoot) { repositoryRoot in
+            synchronizeTreeState(repositoryRoot: repositoryRoot)
+        }
+    }
+
+    private func synchronizeTreeState(repositoryRoot: URL) {
+        guard treeRepositoryRoot != repositoryRoot else { return }
+        treeRepositoryRoot = repositoryRoot
+        collapsedTreeDirectories.removeAll()
     }
 
     private func repositoryHeader(_ snapshot: SidecarGitSnapshot) -> some View {
@@ -193,6 +209,8 @@ struct SidecarGitView: View {
         rowAction: @escaping (SidecarGitChange) -> Void
     ) -> some View {
         let buttonTitle = isStagedSection ? "Unstage all" : "Stage all"
+        let showsPresentationToggle = !isStagedSection
+            || snapshot.unstagedChanges.isEmpty
 
         return LazyVStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -200,51 +218,158 @@ struct SidecarGitView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(action: sectionAction) {
-                    Image(systemName: title == "Staged" ? "minus.circle" : "plus.circle")
-                        .font(.system(size: 11))
-                }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .disabled(model.isOperating)
-                    .help(buttonTitle)
-            }
-            .frame(height: 22)
 
-            ForEach(changes) { change in
-                SidecarGitChangeRow(
-                    change: change,
-                    isStaged: isStagedSection,
-                    stageHelp: change.isConflict
-                        ? "Resolve this conflict outside the Sidecar."
-                        : (isStagedSection ? "Unstage File" : "Stage File"),
-                    openEnabled: snapshot.availablePaths.contains(change.path),
-                    isOperating: model.isOperating,
-                    onStage: {
-                        rowAction(change)
-                    },
-                    loadDiff: {
-                        try await model.diff(
-                            for: change,
-                            isStaged: isStagedSection
-                        )
-                    },
-                    onOpen: {
-                        openChangedFile(change, snapshot: snapshot)
+                HStack(spacing: 2) {
+                    if showsPresentationToggle {
+                        changePresentationToggle
                     }
+
+                    SidecarToolbarButton(
+                        systemImage: isStagedSection ? "minus.circle" : "plus.circle",
+                        help: buttonTitle,
+                        action: sectionAction
+                    )
+                    .disabled(model.isOperating)
+                    .accessibilityLabel(buttonTitle)
+                }
+            }
+            .frame(height: SidecarMetrics.controlHeight)
+
+            changeRows(
+                changes,
+                snapshot: snapshot,
+                isStagedSection: isStagedSection,
+                rowAction: rowAction
+            )
+        }
+    }
+
+    private var changePresentationToggle: some View {
+        SidecarToolbarButton(
+            systemImage: changePresentation == .list
+                ? "list.bullet"
+                : "list.bullet.indent",
+            help: changePresentation == .list
+                ? "Switch to Tree View"
+                : "Switch to List View",
+            isActive: changePresentation == .tree
+        ) {
+            changePresentation = changePresentation == .list ? .tree : .list
+        }
+        .accessibilityLabel("Changes View")
+        .accessibilityValue(changePresentation == .list ? "List" : "Tree")
+        .accessibilityIdentifier("sidecar-git-change-presentation")
+    }
+
+    @ViewBuilder
+    private func changeRows(
+        _ changes: [SidecarGitChange],
+        snapshot: SidecarGitSnapshot,
+        isStagedSection: Bool,
+        rowAction: @escaping (SidecarGitChange) -> Void
+    ) -> some View {
+        switch changePresentation {
+        case .list:
+            ForEach(changes) { change in
+                changeRow(
+                    change,
+                    displayName: change.path,
+                    depth: 0,
+                    snapshot: snapshot,
+                    isStagedSection: isStagedSection,
+                    rowAction: rowAction
                 )
+            }
+        case .tree:
+            let collapsedPaths = Set(
+                collapsedTreeDirectories.lazy
+                    .filter { $0.isStaged == isStagedSection }
+                    .map(\.path)
+            )
+            let rows = SidecarGitChangeTree.rows(
+                for: changes,
+                collapsedDirectories: collapsedPaths
+            )
+            ForEach(rows) { row in
+                switch row.content {
+                case .directory(let path, let name, let changeCount):
+                    let id = SidecarGitTreeDirectoryID(
+                        isStaged: isStagedSection,
+                        path: path
+                    )
+                    SidecarGitDirectoryRow(
+                        name: name,
+                        changeCount: changeCount,
+                        depth: row.depth,
+                        isCollapsed: collapsedTreeDirectories.contains(id),
+                        onToggle: {
+                            withAnimation(SidecarMetrics.disclosureAnimation) {
+                                if collapsedTreeDirectories.remove(id) == nil {
+                                    collapsedTreeDirectories.insert(id)
+                                }
+                            }
+                        }
+                    )
+                case .change(let change, let name):
+                    changeRow(
+                        change,
+                        displayName: name,
+                        depth: row.depth,
+                        snapshot: snapshot,
+                        isStagedSection: isStagedSection,
+                        rowAction: rowAction
+                    )
+                }
             }
         }
     }
 
+    private func changeRow(
+        _ change: SidecarGitChange,
+        displayName: String,
+        depth: Int,
+        snapshot: SidecarGitSnapshot,
+        isStagedSection: Bool,
+        rowAction: @escaping (SidecarGitChange) -> Void
+    ) -> some View {
+        SidecarGitChangeRow(
+            change: change,
+            displayName: displayName,
+            depth: depth,
+            isStaged: isStagedSection,
+            stageHelp: change.isConflict
+                ? "Resolve this conflict outside the Sidecar."
+                : (isStagedSection ? "Unstage File" : "Stage File"),
+            openEnabled: snapshot.availablePaths.contains(change.path),
+            isOperating: model.isOperating,
+            onStage: {
+                rowAction(change)
+            },
+            loadDiff: {
+                try await model.diff(
+                    for: change,
+                    isStaged: isStagedSection
+                )
+            },
+            onOpen: {
+                openChangedFile(change, snapshot: snapshot)
+            }
+        )
+    }
+
     private func actionStrip(_ snapshot: SidecarGitSnapshot) -> some View {
-        HStack(spacing: 8) {
-            ControlGroup {
-                Button("Commit") {
+        HStack(spacing: 6) {
+            SidecarToolbarGroup {
+                SidecarToolbarTextButton(
+                    title: "Commit",
+                    help: "Commit Changes"
+                ) {
                     commitWindow.show(model: model)
                 }
 
-                Menu {
+                SidecarToolbarDivider()
+
+                SidecarToolbarMenu(help: "Repository Actions") {
                     Button("Fetch") {
                         model.perform(.fetch, label: "Fetching…")
                     }
@@ -267,47 +392,56 @@ struct SidecarGitView: View {
                             model.perform(.rebase(reference: reference), label: "Rebasing onto \(reference)…")
                         }
                     }
-                } label: {
-                    Image(systemName: "chevron.down")
                 }
-                .menuIndicator(.hidden)
             }
-            .controlSize(.small)
             .fixedSize()
             .disabled(model.isOperating)
 
-            let editor = SidecarEditorCatalog.gitEditors.first
-            ControlGroup {
-                Button {
-                    open(snapshot.repositoryRoot, in: editor)
-                } label: {
-                    Text(editor?.name ?? "Finder")
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                }
-
-                Menu {
-                    if SidecarEditorCatalog.gitEditors.isEmpty {
-                        Button("Reveal in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([snapshot.repositoryRoot])
-                        }
-                    } else {
-                        ForEach(SidecarEditorCatalog.gitEditors) { item in
-                            Button(item.name) {
-                                open(snapshot.repositoryRoot, in: item)
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                }
-                .menuIndicator(.hidden)
-            }
-            .controlSize(.small)
-            .fixedSize()
-            .disabled(model.isOperating)
+            repositoryOpenControl(snapshot)
 
             Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func repositoryOpenControl(_ snapshot: SidecarGitSnapshot) -> some View {
+        let editors = SidecarEditorCatalog.gitEditors
+        let primaryEditor = editors.first
+
+        if editors.count <= 1 {
+            SidecarToolbarGroup {
+                SidecarToolbarTextButton(
+                    title: primaryEditor?.name ?? "Finder",
+                    help: primaryEditor.map { "Open Repository in \($0.name)" }
+                        ?? "Reveal in Finder"
+                ) {
+                    open(snapshot.repositoryRoot, in: primaryEditor)
+                }
+            }
+            .fixedSize()
+            .disabled(model.isOperating)
+        } else {
+            SidecarToolbarGroup {
+                SidecarToolbarTextButton(
+                    title: primaryEditor?.name ?? "Finder",
+                    help: primaryEditor.map { "Open Repository in \($0.name)" }
+                        ?? "Reveal in Finder"
+                ) {
+                    open(snapshot.repositoryRoot, in: primaryEditor)
+                }
+
+                SidecarToolbarDivider()
+
+                SidecarToolbarMenu(help: "Open Repository in…") {
+                    ForEach(editors) { editor in
+                        Button(editor.name) {
+                            open(snapshot.repositoryRoot, in: editor)
+                        }
+                    }
+                }
+            }
+            .fixedSize()
+            .disabled(model.isOperating)
         }
     }
 
@@ -377,6 +511,8 @@ struct SidecarGitView: View {
 
 private struct SidecarGitChangeRow: View {
     let change: SidecarGitChange
+    let displayName: String
+    let depth: Int
     let isStaged: Bool
     let stageHelp: String
     let openEnabled: Bool
@@ -397,7 +533,7 @@ private struct SidecarGitChangeRow: View {
                 .foregroundStyle(change.isConflict ? .red : .secondary)
                 .frame(width: 14)
 
-            Text(change.path)
+            Text(displayName)
                 .font(.system(size: 11))
                 .lineLimit(1)
                 .truncationMode(.head)
@@ -442,7 +578,7 @@ private struct SidecarGitChangeRow: View {
                 .transition(.opacity)
             }
         }
-        .padding(.leading, 3)
+        .padding(.leading, 3 + CGFloat(depth) * SidecarMetrics.rowIndent)
         .padding(.trailing, 2)
         .frame(height: SidecarMetrics.rowHeight)
         .background {
@@ -478,6 +614,62 @@ private struct SidecarGitChangeRow: View {
     }
 }
 
+private struct SidecarGitDirectoryRow: View {
+    let name: String
+    let changeCount: Int
+    let depth: Int
+    let isCollapsed: Bool
+    let onToggle: () -> Void
+
+    @State private var isHovering = false
+
+    private var accessibilityDescription: String {
+        let noun = changeCount == 1 ? "file" : "files"
+        return "\(name), \(changeCount) changed \(noun), \(isCollapsed ? "collapsed" : "expanded")"
+    }
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    .frame(width: 10)
+
+                Image(systemName: isCollapsed ? "folder" : "folder.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 14)
+
+                Text(name)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Text("\(changeCount)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.leading, 3 + CGFloat(depth) * SidecarMetrics.rowIndent)
+            .padding(.trailing, 2)
+            .frame(height: SidecarMetrics.rowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sidecarFocusEffectDisabled()
+        .background {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.primary.opacity(isHovering ? 0.05 : 0))
+        }
+        .onHover { isHovering = $0 }
+        .animation(SidecarMetrics.contentAnimation, value: isHovering)
+        .help(isCollapsed ? "Expand \(name)" : "Collapse \(name)")
+        .accessibilityLabel(accessibilityDescription)
+    }
+}
+
 private struct SidecarGitRowActionButton: View {
     let systemImage: String
     let help: String
@@ -491,11 +683,11 @@ private struct SidecarGitRowActionButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isDisabled ? Color.secondary.opacity(0.45) : Color.secondary)
                 .frame(width: 19, height: 19)
                 .background {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.primary.opacity(isHovering ? 0.09 : 0))
+                        .fill(Color.primary.opacity(isHovering && !isDisabled ? 0.09 : 0))
                 }
                 .contentShape(Rectangle())
         }

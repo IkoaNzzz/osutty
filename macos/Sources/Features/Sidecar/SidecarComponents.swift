@@ -258,12 +258,125 @@ extension SidecarStatusRow where Trailing == EmptyView {
     }
 }
 
+struct SidecarToolbarGroup<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            content
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.primary.opacity(0.09), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
+struct SidecarToolbarTextButton: View {
+    let title: String
+    let help: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(height: SidecarMetrics.controlHeight)
+                .background {
+                    Rectangle()
+                        .fill(hoverFill)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sidecarFocusEffectDisabled()
+        .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.55))
+        .help(help)
+        .accessibilityLabel(help)
+        .onHover { isHovering = $0 }
+        .animation(SidecarMetrics.contentAnimation, value: isHovering)
+    }
+
+    private var hoverFill: Color {
+        guard isEnabled, isHovering else { return .clear }
+        return Color.primary.opacity(0.09)
+    }
+}
+
+struct SidecarToolbarMenu<Content: View>: View {
+    let help: String
+    let content: Content
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    init(help: String, @ViewBuilder content: () -> Content) {
+        self.help = help
+        self.content = content()
+    }
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(isEnabled ? Color.secondary : Color.secondary.opacity(0.45))
+                .frame(
+                    width: SidecarMetrics.controlHeight,
+                    height: SidecarMetrics.controlHeight
+                )
+                .background {
+                    Rectangle()
+                        .fill(hoverFill)
+                }
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(help)
+        .accessibilityLabel(help)
+        .onHover { isHovering = $0 }
+        .animation(SidecarMetrics.contentAnimation, value: isHovering)
+    }
+
+    private var hoverFill: Color {
+        guard isEnabled, isHovering else { return .clear }
+        return Color.primary.opacity(0.09)
+    }
+}
+
+struct SidecarToolbarDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(width: 1, height: 14)
+            .accessibilityHidden(true)
+    }
+}
+
 struct SidecarToolbarButton: View {
     let systemImage: String
     let help: String
     var isActive = false
     let action: () -> Void
 
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovering = false
 
     var body: some View {
@@ -271,14 +384,11 @@ struct SidecarToolbarButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                .opacity(isEnabled ? 1 : 0.5)
                 .frame(width: SidecarMetrics.controlHeight, height: SidecarMetrics.controlHeight)
                 .background {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(
-                            isActive
-                                ? Color.accentColor.opacity(0.12)
-                                : Color.primary.opacity(isHovering ? 0.07 : 0)
-                        )
+                        .fill(backgroundColor)
                 }
                 .contentShape(Rectangle())
         }
@@ -288,6 +398,14 @@ struct SidecarToolbarButton: View {
         .onHover { isHovering = $0 }
         .animation(SidecarMetrics.contentAnimation, value: isHovering)
         .animation(SidecarMetrics.contentAnimation, value: isActive)
+    }
+
+    private var backgroundColor: Color {
+        if isActive {
+            return Color.accentColor.opacity(isEnabled ? 0.12 : 0.06)
+        }
+        guard isEnabled, isHovering else { return .clear }
+        return Color.primary.opacity(0.07)
     }
 }
 

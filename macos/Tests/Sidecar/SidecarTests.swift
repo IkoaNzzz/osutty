@@ -111,6 +111,26 @@ struct SidecarGitParserTests {
 }
 
 struct SidecarGitServiceTests {
+    @Test func reportsEveryFileInsideUntrackedDirectories() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try initializeRepository(root)
+        let generated = root.appending(path: "Generated", directoryHint: .isDirectory)
+        let nested = generated.appending(path: "Nested", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Data("one\n".utf8).write(to: generated.appending(path: "one.txt"))
+        try Data("two\n".utf8).write(to: nested.appending(path: "two.swift"))
+
+        let service = SidecarGitService()
+        let snapshot = try #require(try await service.snapshot(workingDirectory: root))
+
+        #expect(Set(snapshot.unstagedChanges.map(\.path)) == [
+            "Generated/Nested/two.swift",
+            "Generated/one.txt",
+        ])
+    }
+
     @Test func snapshotsAndMutatesAnIsolatedRepository() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -438,6 +458,76 @@ struct SidecarGitServiceTests {
             #expect(process.terminationStatus == 0)
         }
         return process.terminationStatus
+    }
+}
+
+struct SidecarGitChangeTreeTests {
+    @Test func preservesEveryFileAndSupportsCollapsedDirectories() {
+        let changes = [
+            change("Sources/UI/Row.swift"),
+            change("Sources/App.swift"),
+            change("README.md"),
+            change("Sources/UI/Pane.swift"),
+        ]
+
+        let expanded = SidecarGitChangeTree.rows(for: changes)
+        #expect(changePaths(in: expanded) == [
+            "README.md",
+            "Sources/App.swift",
+            "Sources/UI/Pane.swift",
+            "Sources/UI/Row.swift",
+        ])
+        #expect(directoryPaths(in: expanded) == ["Sources", "Sources/UI"])
+        #expect(directoryCounts(in: expanded) == ["Sources": 3, "Sources/UI": 2])
+
+        let collapsed = SidecarGitChangeTree.rows(
+            for: changes,
+            collapsedDirectories: ["Sources"]
+        )
+        #expect(changePaths(in: collapsed) == ["README.md"])
+        #expect(directoryPaths(in: collapsed) == ["Sources"])
+
+        let nestedCollapsed = SidecarGitChangeTree.rows(
+            for: changes,
+            collapsedDirectories: ["Sources/UI"]
+        )
+        #expect(changePaths(in: nestedCollapsed) == [
+            "README.md",
+            "Sources/App.swift",
+        ])
+        #expect(directoryPaths(in: nestedCollapsed) == ["Sources", "Sources/UI"])
+    }
+
+    private func change(_ path: String) -> SidecarGitChange {
+        .init(
+            path: path,
+            originalPath: nil,
+            indexStatus: ".",
+            worktreeStatus: "M",
+            isUntracked: false,
+            isConflict: false
+        )
+    }
+
+    private func changePaths(in rows: [SidecarGitChangeTreeRow]) -> [String] {
+        rows.compactMap { row in
+            guard case .change(let change, _) = row.content else { return nil }
+            return change.path
+        }
+    }
+
+    private func directoryPaths(in rows: [SidecarGitChangeTreeRow]) -> [String] {
+        rows.compactMap { row in
+            guard case .directory(let path, _, _) = row.content else { return nil }
+            return path
+        }
+    }
+
+    private func directoryCounts(in rows: [SidecarGitChangeTreeRow]) -> [String: Int] {
+        rows.reduce(into: [:]) { counts, row in
+            guard case .directory(let path, _, let count) = row.content else { return }
+            counts[path] = count
+        }
     }
 }
 
