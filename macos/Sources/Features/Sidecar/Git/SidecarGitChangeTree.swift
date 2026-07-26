@@ -29,68 +29,133 @@ struct SidecarGitChangeTreeRow: Identifiable, Equatable {
     }
 }
 
+enum SidecarGitChangeOrdering {
+    static func sorted(_ changes: [SidecarGitChange]) -> [SidecarGitChange] {
+        changes.sorted { lhs, rhs in
+            if lhs.path != rhs.path {
+                return naturallyPrecedes(lhs.path, rhs.path)
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    static func naturallyPrecedes(_ lhs: String, _ rhs: String) -> Bool {
+        switch lhs.localizedStandardCompare(rhs) {
+        case .orderedAscending:
+            true
+        case .orderedDescending:
+            false
+        case .orderedSame:
+            lhs < rhs
+        }
+    }
+}
+
 enum SidecarGitChangeTree {
     static func rows(
         for changes: [SidecarGitChange],
         collapsedDirectories: Set<String> = []
     ) -> [SidecarGitChangeTreeRow] {
-        let counts = directoryCounts(for: changes)
-        let sortedChanges = changes.sorted {
-            $0.path.localizedStandardCompare($1.path) == .orderedAscending
+        let root = DirectoryNode()
+        for change in changes {
+            root.insert(change)
         }
-        var emittedDirectories = Set<String>()
+
         var rows: [SidecarGitChangeTreeRow] = []
-
-        for change in sortedChanges {
-            let components = change.path.split(separator: "/").map(String.init)
-            guard let name = components.last else { continue }
-
-            var directoryPath = ""
-            var isHidden = false
-            for (depth, directoryName) in components.dropLast().enumerated() {
-                directoryPath = directoryPath.isEmpty
-                    ? directoryName
-                    : "\(directoryPath)/\(directoryName)"
-                if emittedDirectories.insert(directoryPath).inserted {
-                    rows.append(.init(
-                        content: .directory(
-                            path: directoryPath,
-                            name: directoryName,
-                            changeCount: counts[directoryPath, default: 0]
-                        ),
-                        depth: depth
-                    ))
-                }
-                if collapsedDirectories.contains(directoryPath) {
-                    isHidden = true
-                    break
-                }
-            }
-
-            if !isHidden {
-                rows.append(.init(
-                    content: .change(change, name: name),
-                    depth: max(0, components.count - 1)
-                ))
-            }
-        }
+        rows.reserveCapacity(changes.count)
+        appendRows(
+            from: root,
+            parentPath: "",
+            depth: 0,
+            collapsedDirectories: collapsedDirectories,
+            to: &rows
+        )
         return rows
     }
 
-    private static func directoryCounts(
-        for changes: [SidecarGitChange]
-    ) -> [String: Int] {
-        var counts: [String: Int] = [:]
-        for change in changes {
-            let directories = change.path.split(separator: "/").dropLast()
-            var directoryPath = ""
-            for directory in directories {
-                directoryPath = directoryPath.isEmpty
-                    ? String(directory)
-                    : "\(directoryPath)/\(directory)"
-                counts[directoryPath, default: 0] += 1
+    private static func appendRows(
+        from node: DirectoryNode,
+        parentPath: String,
+        depth: Int,
+        collapsedDirectories: Set<String>,
+        to rows: inout [SidecarGitChangeTreeRow]
+    ) {
+        let directories = node.directories.sorted { lhs, rhs in
+            SidecarGitChangeOrdering.naturallyPrecedes(lhs.key, rhs.key)
+        }
+        for (name, directory) in directories {
+            let path = parentPath.isEmpty ? name : "\(parentPath)/\(name)"
+            rows.append(.init(
+                content: .directory(
+                    path: path,
+                    name: name,
+                    changeCount: directory.changeCount
+                ),
+                depth: depth
+            ))
+            if !collapsedDirectories.contains(path) {
+                appendRows(
+                    from: directory,
+                    parentPath: path,
+                    depth: depth + 1,
+                    collapsedDirectories: collapsedDirectories,
+                    to: &rows
+                )
             }
         }
-        return counts
+
+        for item in node.changes.sorted(by: { lhs, rhs in
+            if lhs.name != rhs.name {
+                return SidecarGitChangeOrdering.naturallyPrecedes(lhs.name, rhs.name)
+            }
+            return lhs.change.id < rhs.change.id
+        }) {
+            rows.append(.init(
+                content: .change(item.change, name: item.name),
+                depth: depth
+            ))
+        }
+    }
+
+    private final class DirectoryNode {
+        typealias ChangeItem = (name: String, change: SidecarGitChange)
+
+        var changeCount = 0
+        var directories: [String: DirectoryNode] = [:]
+        var changes: [ChangeItem] = []
+
+        func insert(_ change: SidecarGitChange) {
+            insert(change, components: change.path.split(separator: "/")[...])
+        }
+
+        private func insert(
+            _ change: SidecarGitChange,
+            components: ArraySlice<Substring>
+        ) {
+            guard let component = components.first else { return }
+            changeCount += 1
+
+            let name = String(component)
+            let remainingComponents = components.dropFirst()
+            guard !remainingComponents.isEmpty else {
+                changes.append((name: name, change: change))
+                return
+            }
+
+            directory(named: name).insert(
+                change,
+                components: remainingComponents
+            )
+        }
+
+        private func directory(named name: String) -> DirectoryNode {
+            if let directory = directories[name] {
+                return directory
+            }
+
+            let directory = DirectoryNode()
+            directories[name] = directory
+            return directory
+        }
     }
 }

@@ -7,7 +7,7 @@ struct SidecarGitSnapshot: Equatable, Sendable {
     let upstream: String?
     let ahead: Int
     let behind: Int
-    let remoteURL: String?
+    private(set) var remoteURL: String?
     let insertions: Int
     let deletions: Int
     let changes: [SidecarGitChange]
@@ -27,6 +27,7 @@ struct SidecarGitSnapshot: Equatable, Sendable {
         changes: [SidecarGitChange],
         availablePaths: Set<String>
     ) {
+        let orderedChanges = SidecarGitChangeOrdering.sorted(changes)
         self.repositoryRoot = repositoryRoot
         self.branch = branch
         self.upstream = upstream
@@ -35,25 +36,16 @@ struct SidecarGitSnapshot: Equatable, Sendable {
         self.remoteURL = remoteURL
         self.insertions = insertions
         self.deletions = deletions
-        self.changes = changes
-        self.stagedChanges = changes.filter { $0.isStaged && !$0.isConflict }
-        self.unstagedChanges = changes.filter(\.isUnstaged)
+        self.changes = orderedChanges
+        self.stagedChanges = orderedChanges.filter { $0.isStaged && !$0.isConflict }
+        self.unstagedChanges = orderedChanges.filter(\.isUnstaged)
         self.availablePaths = availablePaths
     }
 
     func replacingRemoteURL(_ remoteURL: String?) -> Self {
-        .init(
-            repositoryRoot: repositoryRoot,
-            branch: branch,
-            upstream: upstream,
-            ahead: ahead,
-            behind: behind,
-            remoteURL: remoteURL,
-            insertions: insertions,
-            deletions: deletions,
-            changes: changes,
-            availablePaths: availablePaths
-        )
+        var copy = self
+        copy.remoteURL = remoteURL
+        return copy
     }
 }
 
