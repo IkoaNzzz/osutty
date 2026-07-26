@@ -569,6 +569,32 @@ struct SidecarFileOperationServiceTests {
 
 @MainActor
 struct SidecarQuickEditorTests {
+    @Test func themeRefreshPreservesSyntaxColors() throws {
+        let editor = SidecarCodeEditor(
+            text: .constant("let value = 1"),
+            fileName: "example.swift",
+            backgroundColor: .black
+        )
+        let coordinator = editor.makeCoordinator()
+        let textView = NSTextView()
+        textView.string = "let value = 1"
+        let storage = try #require(textView.textStorage)
+        storage.addAttribute(
+            .foregroundColor,
+            value: NSColor.systemPurple,
+            range: NSRange(location: 0, length: 3)
+        )
+
+        coordinator.applyTheme(to: textView)
+
+        let color = storage.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSColor
+        #expect(color?.isEqual(NSColor.systemPurple) == true)
+    }
+
     @Test func loadsTracksEditsSavesAndCloses() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "ghostty-sidecar-\(UUID().uuidString)", directoryHint: .isDirectory)

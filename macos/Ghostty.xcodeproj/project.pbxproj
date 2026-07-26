@@ -12,6 +12,7 @@
 		552964E62B34A9B400030505 /* vim in Resources */ = {isa = PBXBuildFile; fileRef = 552964E52B34A9B400030505 /* vim */; };
 		819324582F24E78800A9ED8F /* DockTilePlugin.plugin in Copy DockTilePlugin */ = {isa = PBXBuildFile; fileRef = 8193244D2F24E6C000A9ED8F /* DockTilePlugin.plugin */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		819324642F24FF2100A9ED8F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A5B30538299BEAAB0047F10C /* Assets.xcassets */; };
+		82A7C0032FA7000100A7C003 /* SidecarSyntax in Frameworks */ = {isa = PBXBuildFile; productRef = 82A7C0022FA7000100A7C002 /* SidecarSyntax */; };
 		8F3A9B4C2FA6B88000A18D13 /* Ghostty.sdef in Resources */ = {isa = PBXBuildFile; fileRef = 8F3A9B4B2FA6B88000A18D13 /* Ghostty.sdef */; };
 		9351BE8E3D22937F003B3499 /* nvim in Resources */ = {isa = PBXBuildFile; fileRef = 9351BE8E2D22937F003B3499 /* nvim */; };
 		BFC247F07FD34F2A865EA54F /* Osutty.icns in Resources */ = {isa = PBXBuildFile; fileRef = 275942F8AB9645FCBACE78A9 /* Osutty.icns */; };
@@ -328,6 +329,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A51BFC272B30F1B800E92F16 /* Sparkle in Frameworks */,
+				82A7C0032FA7000100A7C003 /* SidecarSyntax in Frameworks */,
 				A56B880B2A840447007A0E29 /* Carbon.framework in Frameworks */,
 				A571AB1D2A206FCF00248498 /* GhosttyKit.xcframework in Frameworks */,
 			);
@@ -491,6 +493,7 @@
 			name = Ghostty;
 			packageProductDependencies = (
 				A51BFC262B30F1B800E92F16 /* Sparkle */,
+				82A7C0022FA7000100A7C002 /* SidecarSyntax */,
 			);
 			productName = Osutty;
 			productReference = A5B30531299BEAAA0047F10C /* Osutty.app */;
@@ -557,6 +560,7 @@
 			mainGroup = A5B30528299BEAAA0047F10C;
 			packageReferences = (
 				A51BFC252B30F1B700E92F16 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				82A7C0012FA7000100A7C001 /* XCLocalSwiftPackageReference "Packages/SidecarSyntax" */,
 			);
 			productRefGroup = A5B30532299BEAAA0047F10C /* Products */;
 			projectDirPath = "";
@@ -1449,6 +1453,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		82A7C0012FA7000100A7C001 /* XCLocalSwiftPackageReference "Packages/SidecarSyntax" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SidecarSyntax;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		A51BFC252B30F1B700E92F16 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1465,6 +1476,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A51BFC252B30F1B700E92F16 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		82A7C0022FA7000100A7C002 /* SidecarSyntax */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 82A7C0012FA7000100A7C001 /* XCLocalSwiftPackageReference "Packages/SidecarSyntax" */;
+			productName = SidecarSyntax;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
