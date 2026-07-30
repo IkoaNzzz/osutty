@@ -71,6 +71,7 @@ brentschroeter
 brianc442
 c0x0o
 carldaws
+carlvillads
 cespare
 charliie-dev
 chernetskyi
@@ -113,6 +114,7 @@ escalonc
 eunos-1128
 exlee
 -f1813483-netizen
+fallintoplace
 faukah
 filip7
 flou
@@ -256,8 +258,10 @@ rjwittams
 rmengelbrecht
 rmunn
 rockorager
+ronijacobson
 rpfaeffle
 ruoyouz
+ruseel
 sahilkmishra
 samasaur1
 sandydoo
@@ -267,8 +271,10 @@ secrus
 seruman
 seyoungjeong
 silveirapf
+simonbcn
 slsrepo
 sunshine-syz
+svmhdvn
 tasselx
 tbrundige
 tdgroot
@@ -287,6 +293,7 @@ uzaaft
 vancluever
 vaughanandrews
 -vectorpeak Stupid bot cosplaying as a maintainer
+vegerot
 viruslobster
 vlsi
 voidnv

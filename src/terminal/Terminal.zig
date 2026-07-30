@@ -121,6 +121,10 @@ flags: packed struct {
     /// True if the window is focused.
     focused: bool = true,
 
+    /// True if the terminal view may be visible. Unknown visibility is
+    /// represented as visible so callers behave conservatively.
+    visible: bool = true,
+
     /// True if the terminal is in a password entry mode. This is set
     /// to true based on termios state. This is set
     /// to true based on termios state.
@@ -260,7 +264,16 @@ pub const Cursor = struct {
 pub const Options = struct {
     cols: size.CellCountInt,
     rows: size.CellCountInt,
-    max_scrollback: usize = 10_000,
+
+    /// The maximum size of scrollback in bytes. Null is unlimited and zero
+    /// disables scrollback.
+    max_scrollback_bytes: ?usize = 10_000,
+
+    /// The maximum number of physical scrollback rows, excluding the active
+    /// area. Null is unlimited. The effective limit permits at least one
+    /// standard page and only complete historical pages are pruned.
+    max_scrollback_lines: ?usize = null,
+
     colors: Colors = .default,
 
     /// The default mode state. When the terminal gets a reset, it
@@ -304,7 +317,8 @@ pub fn init(
     var screen_set: ScreenSet = try .init(io_impl, alloc, .{
         .cols = cols,
         .rows = rows,
-        .max_scrollback = opts.max_scrollback,
+        .max_scrollback_bytes = opts.max_scrollback_bytes,
+        .max_scrollback_lines = opts.max_scrollback_lines,
         .kitty_image_storage_limit = opts.kitty_image_storage_limit,
         .kitty_image_loading_limits = opts.kitty_image_loading_limits,
     });
@@ -434,6 +448,29 @@ pub fn io(self: *Terminal) std.Io {
 /// The general allocator we should use for this terminal.
 pub fn gpa(self: *Terminal) Allocator {
     return self.screens.active.alloc;
+}
+
+/// Change the primary screen's maximum scrollback allocation in bytes.
+///
+/// Null removes the byte limit and zero disables scrollback. Disabling
+/// scrollback also immediately erases retained history and changes future
+/// scrolling to use the no-scrollback path. The alternate screen is
+/// intentionally unaffected because it never retains scrollback.
+pub fn setScrollbackMaxBytes(self: *Terminal, max: ?usize) void {
+    const primary = self.screens.get(.primary).?;
+    primary.pages.setMaxBytes(max);
+    primary.no_scrollback = max == 0;
+
+    if (primary.no_scrollback) primary.eraseHistory(null);
+}
+
+/// Change the primary screen's maximum number of physical scrollback lines.
+///
+/// Null removes the line limit. The alternate screen is intentionally
+/// unaffected because it never retains scrollback.
+pub fn setScrollbackMaxLines(self: *Terminal, max: ?usize) void {
+    const primary = self.screens.get(.primary).?;
+    primary.pages.setMaxLines(max);
 }
 
 /// Print UTF-8 encoded string to the terminal.
@@ -3599,6 +3636,13 @@ pub fn printAttributes(self: *Terminal, buf: []u8) ![]const u8 {
     }
 
     for (attrs[0..i]) |c| {
+        // Preserve underline styles. Kind of a hack to special case '4'
+        // here but its easier than changing how we do all attributes.
+        if (c == '4' and pen.flags.underline != .single) {
+            try writer.print(";4:{}", .{@intFromEnum(pen.flags.underline)});
+            continue;
+        }
+
         try writer.print(";{c}", .{c});
     }
 
@@ -3829,7 +3873,7 @@ pub fn resize(
             .{
                 .cols = opts.cols,
                 .rows = opts.rows,
-                .max_scrollback = 0,
+                .max_scrollback_bytes = 0,
                 .kitty_image_storage_limit = if (comptime build_options.kitty_graphics)
                     primary.kitty_images.total_limit
                 else
@@ -3875,6 +3919,150 @@ pub fn resize(
         .left = 0,
         .right = opts.cols - 1,
     };
+}
+
+test "Terminal forwards optional scrollback limits" {
+    const max_lines: usize = 123;
+    var t = try init(testing.io, testing.allocator, .{
+        .cols = 80,
+        .rows = 24,
+        .max_scrollback_bytes = null,
+        .max_scrollback_lines = max_lines,
+    });
+    defer t.deinit(testing.allocator);
+
+    try testing.expectEqual(
+        std.math.maxInt(usize),
+        t.screens.active.pages.limits.bytes.explicit,
+    );
+    try testing.expectEqual(
+        max_lines,
+        t.screens.active.pages.limits.lines.explicit,
+    );
+}
+
+test "Terminal setScrollbackMaxBytes" {
+    var t = try init(testing.io, testing.allocator, .{
+        .cols = 80,
+        .rows = 3,
+        .max_scrollback_bytes = null,
+    });
+    defer t.deinit(testing.allocator);
+
+    const primary = t.screens.get(.primary).?;
+    const page_rows: usize = primary.pages.pages.first.?.capacity().rows;
+
+    // Build several complete pages of history so lowering the byte limit has
+    // existing allocations to prune immediately.
+    for (0..4 * page_rows) |_| try t.linefeed();
+    const old_page_size = primary.pages.page_size;
+    t.setScrollbackMaxBytes(1);
+    try testing.expectEqual(@as(usize, 1), primary.pages.limits.bytes.explicit);
+    try testing.expect(primary.pages.page_size < old_page_size);
+    try testing.expect(
+        primary.pages.page_size <= primary.pages.limits.max(.bytes),
+    );
+    try testing.expect(!primary.no_scrollback);
+
+    // Zero switches Screen behavior as well as PageList accounting, discards
+    // all retained history, and prevents future linefeeds from recreating it.
+    t.setScrollbackMaxBytes(0);
+    try testing.expectEqual(@as(usize, 0), primary.pages.limits.bytes.explicit);
+    try testing.expect(primary.no_scrollback);
+    try testing.expectEqual(
+        @as(usize, primary.pages.rows),
+        primary.pages.total_rows,
+    );
+    try testing.expect(primary.pages.viewport == .active);
+
+    for (0..page_rows) |_| try t.linefeed();
+    try testing.expectEqual(
+        @as(usize, primary.pages.rows),
+        primary.pages.total_rows,
+    );
+
+    // Re-enabling unlimited scrollback affects subsequent output.
+    t.setScrollbackMaxBytes(null);
+    try testing.expectEqual(
+        std.math.maxInt(usize),
+        primary.pages.limits.bytes.explicit,
+    );
+    try testing.expect(!primary.no_scrollback);
+    for (0..page_rows) |_| try t.linefeed();
+    try testing.expect(primary.pages.total_rows > primary.pages.rows);
+}
+
+test "Terminal setScrollbackMaxLines" {
+    var t = try init(testing.io, testing.allocator, .{
+        .cols = 80,
+        .rows = 3,
+        .max_scrollback_bytes = null,
+        .max_scrollback_lines = null,
+    });
+    defer t.deinit(testing.allocator);
+
+    const primary = t.screens.get(.primary).?;
+    const page_rows: usize = primary.pages.pages.first.?.capacity().rows;
+
+    for (0..4 * page_rows) |_| try t.linefeed();
+    const old_total_rows = primary.pages.total_rows;
+    t.setScrollbackMaxLines(page_rows);
+    try testing.expectEqual(
+        page_rows,
+        primary.pages.limits.lines.explicit,
+    );
+    try testing.expect(primary.pages.total_rows < old_total_rows);
+    try testing.expect(
+        !primary.pages.limits.exceeded(&primary.pages, .lines),
+    );
+
+    const limited_total_rows = primary.pages.total_rows;
+    t.setScrollbackMaxLines(null);
+    try testing.expectEqual(
+        std.math.maxInt(usize),
+        primary.pages.limits.lines.explicit,
+    );
+    try testing.expectEqual(limited_total_rows, primary.pages.total_rows);
+    for (0..3 * page_rows) |_| try t.linefeed();
+    try testing.expect(
+        primary.pages.total_rows - primary.pages.rows > page_rows,
+    );
+}
+
+test "Terminal setScrollback only affects primary screen" {
+    var t = try init(testing.io, testing.allocator, .{
+        .cols = 80,
+        .rows = 3,
+    });
+    defer t.deinit(testing.allocator);
+
+    _ = try t.switchScreen(.alternate);
+    const primary = t.screens.get(.primary).?;
+    const alternate = t.screens.get(.alternate).?;
+
+    t.setScrollbackMaxBytes(123);
+    t.setScrollbackMaxLines(456);
+
+    try testing.expectEqual(
+        @as(usize, 123),
+        primary.pages.limits.bytes.explicit,
+    );
+    try testing.expectEqual(
+        @as(usize, 456),
+        primary.pages.limits.lines.explicit,
+    );
+    try testing.expect(!primary.no_scrollback);
+
+    try testing.expectEqual(
+        @as(usize, 0),
+        alternate.pages.limits.bytes.explicit,
+    );
+    try testing.expectEqual(
+        std.math.maxInt(usize),
+        alternate.pages.limits.lines.explicit,
+    );
+    try testing.expect(alternate.no_scrollback);
+    try testing.expectEqual(alternate, t.screens.active);
 }
 
 test "Terminal: resize resets synchronized output" {
@@ -4293,8 +4481,8 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
             .{
                 .cols = self.cols,
                 .rows = self.rows,
-                .max_scrollback = switch (key) {
-                    .primary => primary.pages.explicit_max_size,
+                .max_scrollback_bytes = switch (key) {
+                    .primary => primary.pages.limits.bytes.explicit,
                     .alternate => 0,
                 },
 
@@ -4467,8 +4655,13 @@ pub fn fullReset(self: *Terminal) void {
     self.screens.active.reset();
 
     // Rest our basic state
+    const visible = self.flags.visible;
     self.modes.reset();
-    self.flags = .{};
+    self.flags = .{
+        // Visibility belongs to the view rather than terminal state, so a
+        // terminal reset must not make a hidden view potentially visible.
+        .visible = visible,
+    };
     self.tabstops.reset(TABSTOP_INTERVAL);
     self.previous_char = null;
     self.pwd.clearRetainingCapacity();
@@ -7662,7 +7855,7 @@ test "Terminal: insertLines top/bottom scroll region" {
 test "Terminal: insertLines across page boundary marks all shifted rows dirty" {
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback_bytes = 1024 });
     defer t.deinit(alloc);
 
     const first_page = t.screens.active.pages.pages.first.?;
@@ -7717,7 +7910,7 @@ test "Terminal: insertLines hyperlink-dense row crosses page boundary" {
     // page's capacity and retry rather than corrupting the page list.
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback_bytes = 1024 });
     defer t.deinit(alloc);
 
     const pages = &t.screens.active.pages;
@@ -8409,7 +8602,7 @@ test "Terminal: scrollUp creates scrollback in primary screen" {
     // scrollUp (CSI S) should push lines into scrollback like xterm.
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 10 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback_bytes = 10 });
     defer t.deinit(alloc);
 
     // Fill the screen with content
@@ -8452,11 +8645,11 @@ test "Terminal: scrollUp creates scrollback in primary screen" {
     }
 }
 
-test "Terminal: scrollUp with max_scrollback zero" {
-    // When max_scrollback is 0, scrollUp should still work but not retain history
+test "Terminal: scrollUp with max_scrollback_bytes zero" {
+    // When max_scrollback_bytes is 0, scrollUp should still work but not retain history
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback_bytes = 0 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAA");
@@ -8485,11 +8678,11 @@ test "Terminal: scrollUp with max_scrollback zero" {
     }
 }
 
-test "Terminal: scrollUp with max_scrollback zero and top margin" {
-    // When max_scrollback is 0 and top margin is set, should use deleteLines path
+test "Terminal: scrollUp with max_scrollback_bytes zero and top margin" {
+    // When max_scrollback_bytes is 0 and top margin is set, should use deleteLines path
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback_bytes = 0 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAA");
@@ -8516,11 +8709,11 @@ test "Terminal: scrollUp with max_scrollback zero and top margin" {
     }
 }
 
-test "Terminal: scrollUp with max_scrollback zero and left/right margin" {
-    // When max_scrollback is 0 with left/right margins, uses deleteLines path
+test "Terminal: scrollUp with max_scrollback_bytes zero and left/right margin" {
+    // When max_scrollback_bytes is 0 with left/right margins, uses deleteLines path
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 0 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback_bytes = 0 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAABBBBB");
@@ -9702,7 +9895,7 @@ test "Terminal: index bottom of scroll region with hyperlinks" {
 test "Terminal: index bottom of scroll region clear hyperlinks" {
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback_bytes = 0 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(2, 3);
@@ -9895,7 +10088,7 @@ test "Terminal: index bottom of scroll region creates scrollback" {
 test "Terminal: index bottom of scroll region no scrollback" {
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback_bytes = 0 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -10062,7 +10255,7 @@ test "Terminal: index bottom of alt screen top region" {
 test "Terminal: scrollUp top region no scrollback" {
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5, .max_scrollback_bytes = 0 });
     defer t.deinit(alloc);
 
     try t.printString("A\nB\nC\nD\nE");
@@ -10647,7 +10840,7 @@ test "Terminal: deleteLines colors with bg color" {
 test "Terminal: deleteLines across page boundary marks all shifted rows dirty" {
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback_bytes = 1024 });
     defer t.deinit(alloc);
 
     const first_page = t.screens.active.pages.pages.first.?;
@@ -10707,7 +10900,7 @@ test "Terminal: deleteLines hyperlink-dense row crosses page boundary" {
     // this exercises the cursor accounting of the capacity increase.
     const alloc = testing.allocator;
     const io_impl = testing.io;
-    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
+    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10, .max_scrollback_bytes = 1024 });
     defer t.deinit(alloc);
 
     const pages = &t.screens.active.pages;
@@ -13749,13 +13942,23 @@ test "Terminal: printAttributes" {
         try testing.expectEqualStrings("0;1;2;3;4;5;7;8;9;38:2::100:200:255;48:2::101:102:103", buf);
     }
 
-    {
-        try t.setAttribute(.{ .underline = .single });
-        defer t.setAttribute(.unset) catch unreachable;
+    const Case = struct {
+        underline: sgr.Attribute.Underline,
+        expected: []const u8,
+    };
+    for ([_]Case{
+        .{ .underline = .single, .expected = "0;4" },
+        .{ .underline = .double, .expected = "0;4:2" },
+        .{ .underline = .curly, .expected = "0;4:3" },
+        .{ .underline = .dotted, .expected = "0;4:4" },
+        .{ .underline = .dashed, .expected = "0;4:5" },
+    }) |case| {
+        try t.setAttribute(.{ .underline = case.underline });
         const buf = try t.printAttributes(&storage);
-        try testing.expectEqualStrings("0;4", buf);
+        try testing.expectEqualStrings(case.expected, buf);
     }
 
+    try t.setAttribute(.unset);
     {
         const buf = try t.printAttributes(&storage);
         try testing.expectEqualStrings("0", buf);
