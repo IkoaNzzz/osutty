@@ -15,6 +15,8 @@ pub const Action = enum {
     @"scrollback-compression",
     @"screen-clone",
     @"terminal-parser",
+    @"terminal-resize",
+    @"terminal-snapshot",
     @"terminal-stream",
     @"is-symbol",
     @"osc-parser",
@@ -38,6 +40,8 @@ pub const Action = enum {
             .@"codepoint-width" => @import("CodepointWidth.zig"),
             .@"grapheme-break" => @import("GraphemeBreak.zig"),
             .@"terminal-parser" => @import("TerminalParser.zig"),
+            .@"terminal-resize" => @import("TerminalResize.zig"),
+            .@"terminal-snapshot" => @import("TerminalSnapshot.zig"),
             .@"is-symbol" => @import("IsSymbol.zig"),
             .@"osc-parser" => @import("OscParser.zig"),
         };
